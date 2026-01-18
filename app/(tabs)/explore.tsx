@@ -232,9 +232,9 @@ export default function ProfileScreen() {
           <Pressable onPress={openEditModal}>
             <ThemedText style={styles.userName}>{profile.nickname}</ThemedText>
           </Pressable>
-          <ThemedText style={styles.userLevel}>
-            {age !== null ? `${age}岁 · ` : ''}⭐ 初级学员
-          </ThemedText>
+          {age !== null && (
+            <ThemedText style={styles.userLevel}>{age}岁</ThemedText>
+          )}
         </View>
       </View>
 
