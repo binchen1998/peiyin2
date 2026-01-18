@@ -26,46 +26,53 @@ export default function DubbingScreen() {
   const clip = getDubbingClip(id);
   
   const videoRef = useRef<Video>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const playbackSoundRef = useRef<Audio.Sound | null>(null);
+  
   const [isPlaying, setIsPlaying] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>('idle');
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingUri, setRecordingUri] = useState<string | null>(null);
   const [scoringResult, setScoringResult] = useState<ScoringResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPlayingRecording, setIsPlayingRecording] = useState(false);
-  const [playbackSound, setPlaybackSound] = useState<Audio.Sound | null>(null);
 
   useEffect(() => {
     // 请求麦克风权限
     (async () => {
-      const { status } = await Audio.requestPermissionsAsync();
-      if (status !== 'granted') {
-        setError('需要麦克风权限才能录音');
+      try {
+        const { status } = await Audio.requestPermissionsAsync();
+        if (status !== 'granted') {
+          setError('需要麦克风权限才能录音');
+          return;
+        }
+        
+        // 配置音频模式
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+      } catch (err) {
+        console.error('初始化音频失败:', err);
       }
-      
-      // 配置音频模式
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
     })();
 
+    // 组件卸载时清理
     return () => {
-      // 清理录音
-      if (recording) {
-        recording.stopAndUnloadAsync();
-      }
+      const cleanup = async () => {
+        try {
+          if (recordingRef.current) {
+            await recordingRef.current.stopAndUnloadAsync();
+          }
+          if (playbackSoundRef.current) {
+            await playbackSoundRef.current.unloadAsync();
+          }
+        } catch (err) {
+          // 忽略清理时的错误
+        }
+      };
+      cleanup();
     };
-  }, [recording]);
-
-  // 清理播放的音频
-  useEffect(() => {
-    return () => {
-      if (playbackSound) {
-        playbackSound.unloadAsync();
-      }
-    };
-  }, [playbackSound]);
+  }, []);
 
   if (!clip) {
     return (
@@ -107,11 +114,17 @@ export default function DubbingScreen() {
         await videoRef.current.pauseAsync();
       }
 
+      // 确保音频模式正确
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
       const { recording: newRecording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
       
-      setRecording(newRecording);
+      recordingRef.current = newRecording;
       setRecordingStatus('recording');
     } catch (err) {
       console.error('开始录音失败:', err);
@@ -121,12 +134,12 @@ export default function DubbingScreen() {
 
   const stopRecording = async () => {
     try {
-      if (!recording) return;
+      if (!recordingRef.current) return;
 
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
+      await recordingRef.current.stopAndUnloadAsync();
+      const uri = recordingRef.current.getURI();
       
-      setRecording(null);
+      recordingRef.current = null;
       setRecordingUri(uri);
       setRecordingStatus('recorded');
     } catch (err) {
@@ -141,10 +154,10 @@ export default function DubbingScreen() {
 
     try {
       // 如果正在播放，先停止
-      if (playbackSound) {
-        await playbackSound.stopAsync();
-        await playbackSound.unloadAsync();
-        setPlaybackSound(null);
+      if (playbackSoundRef.current) {
+        await playbackSoundRef.current.stopAsync();
+        await playbackSoundRef.current.unloadAsync();
+        playbackSoundRef.current = null;
         setIsPlayingRecording(false);
         return;
       }
@@ -166,7 +179,7 @@ export default function DubbingScreen() {
             // 播放完成
             setIsPlayingRecording(false);
             sound.unloadAsync();
-            setPlaybackSound(null);
+            playbackSoundRef.current = null;
             // 切回录音模式
             Audio.setAudioModeAsync({
               allowsRecordingIOS: true,
@@ -176,7 +189,7 @@ export default function DubbingScreen() {
         }
       );
       
-      setPlaybackSound(sound);
+      playbackSoundRef.current = sound;
       setIsPlayingRecording(true);
     } catch (err) {
       console.error('播放录音失败:', err);
@@ -238,23 +251,27 @@ export default function DubbingScreen() {
   };
 
   const resetRecording = async () => {
-    // 停止播放
-    if (playbackSound) {
-      await playbackSound.stopAsync();
-      await playbackSound.unloadAsync();
-      setPlaybackSound(null);
-      setIsPlayingRecording(false);
+    try {
+      // 停止播放
+      if (playbackSoundRef.current) {
+        await playbackSoundRef.current.stopAsync();
+        await playbackSoundRef.current.unloadAsync();
+        playbackSoundRef.current = null;
+        setIsPlayingRecording(false);
+      }
+      
+      setRecordingUri(null);
+      setScoringResult(null);
+      setRecordingStatus('idle');
+      
+      // 切回录音模式
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+    } catch (err) {
+      console.error('重置录音失败:', err);
     }
-    
-    setRecordingUri(null);
-    setScoringResult(null);
-    setRecordingStatus('idle');
-    
-    // 切回录音模式
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
-    });
   };
 
   return (
