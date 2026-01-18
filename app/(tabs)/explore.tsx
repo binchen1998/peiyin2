@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { 
   StyleSheet, 
   ScrollView, 
@@ -28,10 +28,95 @@ interface LearningStats {
   learningDays: number;
 }
 
+// 徽章定义
+interface Badge {
+  id: string;
+  emoji: string;
+  name: string;
+  description: string;  // 获得标准
+  bgColor: string;
+  checkUnlocked: (stats: LearningStats) => boolean;
+}
+
+const BADGES: Badge[] = [
+  {
+    id: 'first_dubbing',
+    emoji: '🌟',
+    name: '初次配音',
+    description: '完成第1次配音',
+    bgColor: '#FEF3C7',
+    checkUnlocked: (stats) => stats.dubbingCount >= 1,
+  },
+  {
+    id: 'dubbing_10',
+    emoji: '🎤',
+    name: '小小配音员',
+    description: '完成10次配音',
+    bgColor: '#FCE7F3',
+    checkUnlocked: (stats) => stats.dubbingCount >= 10,
+  },
+  {
+    id: 'dubbing_50',
+    emoji: '🎙️',
+    name: '配音达人',
+    description: '完成50次配音',
+    bgColor: '#FED7AA',
+    checkUnlocked: (stats) => stats.dubbingCount >= 50,
+  },
+  {
+    id: 'dubbing_100',
+    emoji: '🏅',
+    name: '配音大师',
+    description: '完成100次配音',
+    bgColor: '#FDE047',
+    checkUnlocked: (stats) => stats.dubbingCount >= 100,
+  },
+  {
+    id: 'score_80',
+    emoji: '🎯',
+    name: '精准发音',
+    description: '平均分数达到80分',
+    bgColor: '#D1FAE5',
+    checkUnlocked: (stats) => stats.averageScore >= 80,
+  },
+  {
+    id: 'score_90',
+    emoji: '💎',
+    name: '发音专家',
+    description: '平均分数达到90分',
+    bgColor: '#A5F3FC',
+    checkUnlocked: (stats) => stats.averageScore >= 90,
+  },
+  {
+    id: 'days_3',
+    emoji: '📚',
+    name: '学习新星',
+    description: '累计学习3天',
+    bgColor: '#DBEAFE',
+    checkUnlocked: (stats) => stats.learningDays >= 3,
+  },
+  {
+    id: 'days_7',
+    emoji: '🔥',
+    name: '坚持一周',
+    description: '累计学习7天',
+    bgColor: '#FEE2E2',
+    checkUnlocked: (stats) => stats.learningDays >= 7,
+  },
+  {
+    id: 'days_30',
+    emoji: '👑',
+    name: '学习王者',
+    description: '累计学习30天',
+    bgColor: '#E9D5FF',
+    checkUnlocked: (stats) => stats.learningDays >= 30,
+  },
+];
+
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
-  const { profile, saveProfile, getAge, isLoading } = useUserProfile();
+  const { profile, saveProfile, getAge } = useUserProfile();
   
   const [showEditModal, setShowEditModal] = useState(false);
   const [editNickname, setEditNickname] = useState('');
@@ -120,6 +205,9 @@ export default function ProfileScreen() {
     return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
   };
 
+  // 计算已获得徽章数量
+  const unlockedCount = BADGES.filter(badge => badge.checkUnlocked(stats)).length;
+
   return (
     <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* 顶部用户信息 */}
@@ -169,15 +257,9 @@ export default function ProfileScreen() {
             <ThemedText style={[styles.infoLabel, { color: colors.textSecondary }]}>昵称</ThemedText>
             <ThemedText style={[styles.infoValue, { color: colors.text }]}>{profile.nickname}</ThemedText>
           </View>
-          <View style={styles.infoRow}>
+          <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
             <ThemedText style={[styles.infoLabel, { color: colors.textSecondary }]}>出生日期</ThemedText>
             <ThemedText style={[styles.infoValue, { color: colors.text }]}>{formatDate(profile.birthDate)}</ThemedText>
-          </View>
-          <View style={styles.infoRow}>
-            <ThemedText style={[styles.infoLabel, { color: colors.textSecondary }]}>年龄</ThemedText>
-            <ThemedText style={[styles.infoValue, { color: colors.text }]}>
-              {age !== null ? `${age}岁` : '未设置'}
-            </ThemedText>
           </View>
         </View>
 
@@ -204,34 +286,42 @@ export default function ProfileScreen() {
 
         {/* 成就徽章 */}
         <View style={[styles.achievementCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>
-            🏆 成就徽章
-          </ThemedText>
+          <View style={styles.achievementHeader}>
+            <ThemedText style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
+              🏆 成就徽章
+            </ThemedText>
+            <ThemedText style={[styles.badgeProgress, { color: colors.textSecondary }]}>
+              {unlockedCount}/{BADGES.length}
+            </ThemedText>
+          </View>
           <View style={styles.badgeGrid}>
-            <View style={styles.badgeItem}>
-              <View style={[styles.badge, { backgroundColor: '#FEF3C7' }]}>
-                <ThemedText style={styles.badgeEmoji}>🌟</ThemedText>
-              </View>
-              <ThemedText style={[styles.badgeLabel, { color: colors.textSecondary }]}>初次配音</ThemedText>
-            </View>
-            <View style={styles.badgeItem}>
-              <View style={[styles.badge, { backgroundColor: '#DBEAFE' }]}>
-                <ThemedText style={styles.badgeEmoji}>📚</ThemedText>
-              </View>
-              <ThemedText style={[styles.badgeLabel, { color: colors.textSecondary }]}>学习达人</ThemedText>
-            </View>
-            <View style={styles.badgeItem}>
-              <View style={[styles.badge, { backgroundColor: '#D1FAE5' }]}>
-                <ThemedText style={styles.badgeEmoji}>🎯</ThemedText>
-              </View>
-              <ThemedText style={[styles.badgeLabel, { color: colors.textSecondary }]}>精准发音</ThemedText>
-            </View>
-            <View style={styles.badgeItem}>
-              <View style={[styles.badge, { backgroundColor: colors.backgroundSecondary }]}>
-                <ThemedText style={styles.badgeEmoji}>🔒</ThemedText>
-              </View>
-              <ThemedText style={[styles.badgeLabel, { color: colors.textSecondary }]}>待解锁</ThemedText>
-            </View>
+            {BADGES.map((badge) => {
+              const isUnlocked = badge.checkUnlocked(stats);
+              return (
+                <View key={badge.id} style={styles.badgeItem}>
+                  <View style={styles.badgeWrapper}>
+                    <View style={[styles.badge, { backgroundColor: badge.bgColor }]}>
+                      <ThemedText style={styles.badgeEmoji}>{badge.emoji}</ThemedText>
+                    </View>
+                    {/* 未解锁蒙版 */}
+                    {!isUnlocked && (
+                      <View style={styles.badgeMask}>
+                        <ThemedText style={styles.lockIcon}>🔒</ThemedText>
+                      </View>
+                    )}
+                  </View>
+                  <ThemedText style={[
+                    styles.badgeLabel, 
+                    { color: isUnlocked ? colors.text : colors.textSecondary }
+                  ]}>
+                    {badge.name}
+                  </ThemedText>
+                  <ThemedText style={[styles.badgeDesc, { color: colors.textSecondary }]}>
+                    {badge.description}
+                  </ThemedText>
+                </View>
+              );
+            })}
           </View>
         </View>
 
@@ -496,26 +586,63 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 16,
   },
+  achievementHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  badgeProgress: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
   badgeGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
   },
   badgeItem: {
+    width: '30%',
     alignItems: 'center',
+    marginBottom: 20,
+  },
+  badgeWrapper: {
+    position: 'relative',
   },
   badge: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
+  },
+  badgeMask: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lockIcon: {
+    fontSize: 20,
   },
   badgeEmoji: {
     fontSize: 28,
   },
   badgeLabel: {
-    fontSize: 11,
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  badgeDesc: {
+    fontSize: 10,
+    textAlign: 'center',
+    marginTop: 2,
   },
   menuCard: {
     borderRadius: 16,
