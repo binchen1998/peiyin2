@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "peiyin2",
+    "name": "英语配音乐园",
     "slug": "peiyin2",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,17 +9,23 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "需要麦克风权限来录制你的配音"
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#FF6B35",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "static",
@@ -33,10 +39,16 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#FF6B35",
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#1F1B24"
           }
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "允许 $(PRODUCT_NAME) 访问麦克风来录制配音"
         }
       ]
     ],

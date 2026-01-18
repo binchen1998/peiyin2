@@ -1,112 +1,275 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { StyleSheet, ScrollView, View, Pressable } from 'react-native';
 
-import { Collapsible } from '@/components/ui/collapsible';
-import { ExternalLink } from '@/components/external-link';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Fonts } from '@/constants/theme';
 
-export default function TabTwoScreen() {
+export default function ProfileScreen() {
+  const colorScheme = useColorScheme() ?? 'light';
+  const colors = Colors[colorScheme];
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
-      headerImage={
-        <IconSymbol
-          size={310}
-          color="#808080"
-          name="chevron.left.forwardslash.chevron.right"
-          style={styles.headerImage}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText
-          type="title"
-          style={{
-            fontFamily: Fonts.rounded,
-          }}>
-          Explore
-        </ThemedText>
-      </ThemedView>
-      <ThemedText>This app includes example code to help you get started.</ThemedText>
-      <Collapsible title="File-based routing">
-        <ThemedText>
-          This app has two screens:{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/explore.tsx</ThemedText>
-        </ThemedText>
-        <ThemedText>
-          The layout file in <ThemedText type="defaultSemiBold">app/(tabs)/_layout.tsx</ThemedText>{' '}
-          sets up the tab navigator.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/router/introduction">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Android, iOS, and web support">
-        <ThemedText>
-          You can open this project on Android, iOS, and the web. To open the web version, press{' '}
-          <ThemedText type="defaultSemiBold">w</ThemedText> in the terminal running this project.
-        </ThemedText>
-      </Collapsible>
-      <Collapsible title="Images">
-        <ThemedText>
-          For static images, you can use the <ThemedText type="defaultSemiBold">@2x</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">@3x</ThemedText> suffixes to provide files for
-          different screen densities
-        </ThemedText>
-        <Image
-          source={require('@/assets/images/react-logo.png')}
-          style={{ width: 100, height: 100, alignSelf: 'center' }}
-        />
-        <ExternalLink href="https://reactnative.dev/docs/images">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Light and dark mode components">
-        <ThemedText>
-          This template has light and dark mode support. The{' '}
-          <ThemedText type="defaultSemiBold">useColorScheme()</ThemedText> hook lets you inspect
-          what the user&apos;s current color scheme is, and so you can adjust UI colors accordingly.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Animations">
-        <ThemedText>
-          This template includes an example of an animated component. The{' '}
-          <ThemedText type="defaultSemiBold">components/HelloWave.tsx</ThemedText> component uses
-          the powerful{' '}
-          <ThemedText type="defaultSemiBold" style={{ fontFamily: Fonts.mono }}>
-            react-native-reanimated
-          </ThemedText>{' '}
-          library to create a waving hand animation.
-        </ThemedText>
-        {Platform.select({
-          ios: (
-            <ThemedText>
-              The <ThemedText type="defaultSemiBold">components/ParallaxScrollView.tsx</ThemedText>{' '}
-              component provides a parallax effect for the header image.
-            </ThemedText>
-          ),
-        })}
-      </Collapsible>
-    </ParallaxScrollView>
+    <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* 顶部用户信息 */}
+      <View style={[styles.header, { backgroundColor: colors.primary }]}>
+        <View style={styles.avatarContainer}>
+          <View style={[styles.avatar, { backgroundColor: 'rgba(255,255,255,0.3)' }]}>
+            <ThemedText style={styles.avatarText}>🧒</ThemedText>
+          </View>
+          <ThemedText style={styles.userName}>小小配音家</ThemedText>
+          <ThemedText style={styles.userLevel}>⭐ 初级学员</ThemedText>
+        </View>
+      </View>
+
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* 学习统计 */}
+        <View style={[styles.statsCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>
+            📊 学习统计
+          </ThemedText>
+          <View style={styles.statsGrid}>
+            <View style={styles.statItem}>
+              <ThemedText style={[styles.statValue, { color: colors.primary }]}>12</ThemedText>
+              <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>配音次数</ThemedText>
+            </View>
+            <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
+            <View style={styles.statItem}>
+              <ThemedText style={[styles.statValue, { color: colors.success }]}>85</ThemedText>
+              <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>平均分数</ThemedText>
+            </View>
+            <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
+            <View style={styles.statItem}>
+              <ThemedText style={[styles.statValue, { color: colors.secondary }]}>3</ThemedText>
+              <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>学习天数</ThemedText>
+            </View>
+          </View>
+        </View>
+
+        {/* 成就徽章 */}
+        <View style={[styles.achievementCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>
+            🏆 成就徽章
+          </ThemedText>
+          <View style={styles.badgeGrid}>
+            <View style={styles.badgeItem}>
+              <View style={[styles.badge, { backgroundColor: '#FEF3C7' }]}>
+                <ThemedText style={styles.badgeEmoji}>🌟</ThemedText>
+              </View>
+              <ThemedText style={[styles.badgeLabel, { color: colors.textSecondary }]}>初次配音</ThemedText>
+            </View>
+            <View style={styles.badgeItem}>
+              <View style={[styles.badge, { backgroundColor: '#DBEAFE' }]}>
+                <ThemedText style={styles.badgeEmoji}>📚</ThemedText>
+              </View>
+              <ThemedText style={[styles.badgeLabel, { color: colors.textSecondary }]}>学习达人</ThemedText>
+            </View>
+            <View style={styles.badgeItem}>
+              <View style={[styles.badge, { backgroundColor: '#D1FAE5' }]}>
+                <ThemedText style={styles.badgeEmoji}>🎯</ThemedText>
+              </View>
+              <ThemedText style={[styles.badgeLabel, { color: colors.textSecondary }]}>精准发音</ThemedText>
+            </View>
+            <View style={styles.badgeItem}>
+              <View style={[styles.badge, { backgroundColor: colors.backgroundSecondary }]}>
+                <ThemedText style={styles.badgeEmoji}>🔒</ThemedText>
+              </View>
+              <ThemedText style={[styles.badgeLabel, { color: colors.textSecondary }]}>待解锁</ThemedText>
+            </View>
+          </View>
+        </View>
+
+        {/* 功能菜单 */}
+        <View style={[styles.menuCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <MenuItem 
+            icon="gear" 
+            title="设置" 
+            colors={colors}
+          />
+          <View style={[styles.menuDivider, { backgroundColor: colors.cardBorder }]} />
+          <MenuItem 
+            icon="questionmark.circle" 
+            title="帮助与反馈" 
+            colors={colors}
+          />
+          <View style={[styles.menuDivider, { backgroundColor: colors.cardBorder }]} />
+          <MenuItem 
+            icon="info.circle" 
+            title="关于我们" 
+            colors={colors}
+          />
+        </View>
+
+        {/* 底部版本信息 */}
+        <View style={styles.footer}>
+          <ThemedText style={[styles.footerText, { color: colors.textSecondary }]}>
+            英语配音乐园 v1.0.0
+          </ThemedText>
+          <ThemedText style={[styles.footerSubText, { color: colors.textSecondary }]}>
+            让孩子爱上英语配音 ❤️
+          </ThemedText>
+        </View>
+      </ScrollView>
+    </ThemedView>
+  );
+}
+
+interface MenuItemProps {
+  icon: string;
+  title: string;
+  colors: typeof Colors.light;
+}
+
+function MenuItem({ icon, title, colors }: MenuItemProps) {
+  return (
+    <Pressable style={styles.menuItem}>
+      <View style={styles.menuItemLeft}>
+        <IconSymbol name={icon as any} size={22} color={colors.primary} />
+        <ThemedText style={[styles.menuItemTitle, { color: colors.text }]}>{title}</ThemedText>
+      </View>
+      <IconSymbol name="chevron.right" size={18} color={colors.textSecondary} />
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  headerImage: {
-    color: '#808080',
-    bottom: -90,
-    left: -35,
-    position: 'absolute',
+  container: {
+    flex: 1,
   },
-  titleContainer: {
+  header: {
+    paddingTop: 60,
+    paddingBottom: 30,
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
+  },
+  avatarContainer: {
+    alignItems: 'center',
+  },
+  avatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  avatarText: {
+    fontSize: 40,
+  },
+  userName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  userLevel: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.9)',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 40,
+  },
+  statsCard: {
+    borderRadius: 16,
+    borderWidth: 2,
+    padding: 16,
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 16,
+  },
+  statsGrid: {
     flexDirection: 'row',
-    gap: 8,
+    justifyContent: 'space-around',
+  },
+  statItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statValue: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 12,
+  },
+  statDivider: {
+    width: 1,
+    height: 40,
+  },
+  achievementCard: {
+    borderRadius: 16,
+    borderWidth: 2,
+    padding: 16,
+    marginBottom: 16,
+  },
+  badgeGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  badgeItem: {
+    alignItems: 'center',
+  },
+  badge: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  badgeEmoji: {
+    fontSize: 28,
+  },
+  badgeLabel: {
+    fontSize: 11,
+  },
+  menuCard: {
+    borderRadius: 16,
+    borderWidth: 2,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  menuItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  menuItemTitle: {
+    fontSize: 16,
+  },
+  menuDivider: {
+    height: 1,
+    marginHorizontal: 16,
+  },
+  footer: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  footerText: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  footerSubText: {
+    fontSize: 11,
   },
 });

@@ -1,0 +1,16 @@
+# FastAPI 后端依赖
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+pydantic==2.5.3
+
+# 语音处理
+vosk==0.3.45
+pydub==0.25.1
+soundfile==0.12.1
+
+# 其他工具
+numpy==1.26.3
+python-jose[cryptography]==3.3.0
+aiofiles==23.2.1
+httpx==0.26.0

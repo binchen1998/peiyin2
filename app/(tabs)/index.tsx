@@ -1,98 +1,220 @@
 import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { StyleSheet, ScrollView, View, Pressable, Dimensions } from 'react-native';
+import { useRouter } from 'expo-router';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { getCartoons } from '@/data/mock-data';
+import { Cartoon } from '@/types';
+
+const { width } = Dimensions.get('window');
+const CARD_WIDTH = (width - 48) / 2;
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const colorScheme = useColorScheme() ?? 'light';
+  const colors = Colors[colorScheme];
+  const router = useRouter();
+  const cartoons = getCartoons();
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  const handleCartoonPress = (cartoon: Cartoon) => {
+    router.push(`/cartoon/${cartoon.id}`);
+  };
+
+  return (
+    <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* 顶部标题区域 */}
+      <View style={[styles.header, { backgroundColor: colors.primary }]}>
+        <View style={styles.headerContent}>
+          <ThemedText style={styles.headerTitle}>🎬 英语配音乐园</ThemedText>
+          <ThemedText style={styles.headerSubtitle}>选择你喜欢的动画片开始配音吧！</ThemedText>
+        </View>
+        <View style={styles.headerDecoration}>
+          <ThemedText style={styles.decorationEmoji}>🎤</ThemedText>
+        </View>
+      </View>
+
+      {/* 动画片列表 */}
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.sectionHeader}>
+          <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>
+            🎭 热门动画片
+          </ThemedText>
+        </View>
+        
+        <View style={styles.grid}>
+          {cartoons.map((cartoon, index) => (
+            <Pressable
+              key={cartoon.id}
+              style={({ pressed }) => [
+                styles.card,
+                { 
+                  backgroundColor: colors.card,
+                  borderColor: colors.cardBorder,
+                  transform: [{ scale: pressed ? 0.95 : 1 }],
+                },
+              ]}
+              onPress={() => handleCartoonPress(cartoon)}
+            >
+              <View style={styles.cardImageContainer}>
+                <Image
+                  source={{ uri: cartoon.thumbnail }}
+                  style={styles.cardImage}
+                  contentFit="cover"
+                  transition={300}
+                />
+                <View style={[styles.cardBadge, { backgroundColor: getCardColor(index) }]}>
+                  <ThemedText style={styles.cardBadgeText}>
+                    {getCardEmoji(index)}
+                  </ThemedText>
+                </View>
+              </View>
+              <View style={styles.cardContent}>
+                <ThemedText style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
+                  {cartoon.nameCN}
+                </ThemedText>
+                <ThemedText style={[styles.cardSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {cartoon.name}
+                </ThemedText>
+              </View>
+            </Pressable>
+          ))}
+        </View>
+
+        {/* 底部提示 */}
+        <View style={styles.footer}>
+          <ThemedText style={[styles.footerText, { color: colors.textSecondary }]}>
+            👆 点击动画片开始你的配音之旅！
+          </ThemedText>
+        </View>
+      </ScrollView>
+    </ThemedView>
   );
 }
 
+// 获取卡片装饰颜色
+const getCardColor = (index: number): string => {
+  const colors = ['#FF6B35', '#7C3AED', '#10B981', '#3B82F6', '#EC4899', '#F59E0B'];
+  return colors[index % colors.length];
+};
+
+// 获取卡片装饰表情
+const getCardEmoji = (index: number): string => {
+  const emojis = ['🐷', '🐕', '❄️', '🤠', '🐠', '🍌'];
+  return emojis[index % emojis.length];
+};
+
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+  },
+  header: {
+    paddingTop: 60,
+    paddingBottom: 24,
+    paddingHorizontal: 20,
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
   },
-  stepContainer: {
-    gap: 8,
+  headerContent: {
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
     marginBottom: 8,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
+  headerSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.9)',
+  },
+  headerDecoration: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  decorationEmoji: {
+    fontSize: 30,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 40,
+  },
+  sectionHeader: {
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  card: {
+    width: CARD_WIDTH,
+    borderRadius: 16,
+    marginBottom: 16,
+    borderWidth: 2,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  cardImageContainer: {
+    position: 'relative',
+  },
+  cardImage: {
+    width: '100%',
+    height: CARD_WIDTH * 0.7,
+  },
+  cardBadge: {
     position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardBadgeText: {
+    fontSize: 18,
+  },
+  cardContent: {
+    padding: 12,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  cardSubtitle: {
+    fontSize: 12,
+  },
+  footer: {
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  footerText: {
+    fontSize: 14,
   },
 });
