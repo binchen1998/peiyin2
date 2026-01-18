@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+
+# 模型文件（太大不提交到 git）
+model/
+
+# 临时文件
+*.tmp
+*.temp
+*.log
+
+# IDE
+.vscode/
+.idea/
