@@ -332,18 +332,6 @@ export default function ProfileScreen() {
             title="设置" 
             colors={colors}
           />
-          <View style={[styles.menuDivider, { backgroundColor: colors.cardBorder }]} />
-          <MenuItem 
-            icon="questionmark.circle" 
-            title="帮助与反馈" 
-            colors={colors}
-          />
-          <View style={[styles.menuDivider, { backgroundColor: colors.cardBorder }]} />
-          <MenuItem 
-            icon="info.circle" 
-            title="关于我们" 
-            colors={colors}
-          />
         </View>
 
         {/* 底部版本信息 */}
