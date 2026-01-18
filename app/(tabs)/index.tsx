@@ -50,19 +50,12 @@ export default function HomeScreen() {
               ]}
               onPress={() => handleCartoonPress(cartoon)}
             >
-              <View style={styles.cardImageContainer}>
-                <Image
-                  source={{ uri: cartoon.thumbnail }}
-                  style={styles.cardImage}
-                  contentFit="cover"
-                  transition={300}
-                />
-                <View style={[styles.cardBadge, { backgroundColor: getCardColor(index) }]}>
-                  <ThemedText style={styles.cardBadgeText}>
-                    {getCardEmoji(index)}
-                  </ThemedText>
-                </View>
-              </View>
+              <Image
+                source={{ uri: cartoon.thumbnail }}
+                style={styles.cardImage}
+                contentFit="cover"
+                transition={300}
+              />
               <View style={styles.cardContent}>
                 <ThemedText style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
                   {cartoon.nameCN}
@@ -85,18 +78,6 @@ export default function HomeScreen() {
     </ThemedView>
   );
 }
-
-// 获取卡片装饰颜色
-const getCardColor = (index: number): string => {
-  const colors = ['#FF6B35', '#7C3AED', '#10B981', '#3B82F6', '#EC4899', '#F59E0B'];
-  return colors[index % colors.length];
-};
-
-// 获取卡片装饰表情
-const getCardEmoji = (index: number): string => {
-  const emojis = ['🐷', '🐕', '❄️', '🤠', '🐠', '🍌'];
-  return emojis[index % emojis.length];
-};
 
 const styles = StyleSheet.create({
   container: {
@@ -134,25 +115,9 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  cardImageContainer: {
-    position: 'relative',
-  },
   cardImage: {
     width: '100%',
     height: CARD_WIDTH * 0.7,
-  },
-  cardBadge: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardBadgeText: {
-    fontSize: 18,
   },
   cardContent: {
     padding: 12,

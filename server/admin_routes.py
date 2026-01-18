@@ -415,3 +415,169 @@ async def upload_file(
     # 返回文件URL
     url = f"/uploads/{subdir}/{filename}"
     return {"url": url, "filename": filename}
+
+
+# ===== 数据导出/导入 =====
+@router.get("/export")
+def export_data(db: Session = Depends(get_db)):
+    """导出所有动画片数据为JSON"""
+    cartoons = db.query(Cartoon).all()
+    
+    export_data = []
+    for cartoon in cartoons:
+        cartoon_data = {
+            "id": cartoon.id,
+            "name": cartoon.name,
+            "name_cn": cartoon.name_cn,
+            "thumbnail": cartoon.thumbnail,
+            "description": cartoon.description,
+            "is_active": cartoon.is_active,
+            "seasons": []
+        }
+        
+        seasons = db.query(Season).filter(Season.cartoon_id == cartoon.id).order_by(Season.number).all()
+        for season in seasons:
+            season_data = {
+                "id": season.id,
+                "number": season.number,
+                "is_active": season.is_active,
+                "episodes": []
+            }
+            
+            episodes = db.query(Episode).filter(Episode.season_id == season.id).order_by(Episode.number).all()
+            for episode in episodes:
+                episode_data = {
+                    "id": episode.id,
+                    "number": episode.number,
+                    "title": episode.title,
+                    "title_cn": episode.title_cn,
+                    "thumbnail": episode.thumbnail,
+                    "is_active": episode.is_active,
+                    "clips": []
+                }
+                
+                clips = db.query(DubbingClip).filter(DubbingClip.episode_id == episode.id).order_by(DubbingClip.order).all()
+                for clip in clips:
+                    clip_data = {
+                        "id": clip.id,
+                        "order": clip.order,
+                        "video_url": clip.video_url,
+                        "original_text": clip.original_text,
+                        "translation_cn": clip.translation_cn,
+                        "start_time": clip.start_time,
+                        "end_time": clip.end_time,
+                        "character": clip.character,
+                        "is_active": clip.is_active
+                    }
+                    episode_data["clips"].append(clip_data)
+                
+                season_data["episodes"].append(episode_data)
+            
+            cartoon_data["seasons"].append(season_data)
+        
+        export_data.append(cartoon_data)
+    
+    return {"cartoons": export_data, "version": "1.0"}
+
+
+@router.post("/import")
+async def import_data(
+    file: UploadFile = File(...),
+    replace: bool = Form(False),  # 是否替换现有数据
+    db: Session = Depends(get_db)
+):
+    """从JSON文件导入动画片数据"""
+    try:
+        content = await file.read()
+        data = json.loads(content.decode('utf-8'))
+        
+        if "cartoons" not in data:
+            raise HTTPException(status_code=400, detail="无效的JSON格式，缺少cartoons字段")
+        
+        # 如果选择替换，先删除所有现有数据
+        if replace:
+            db.query(DubbingClip).delete()
+            db.query(Episode).delete()
+            db.query(Season).delete()
+            db.query(Cartoon).delete()
+            db.commit()
+        
+        imported_count = {
+            "cartoons": 0,
+            "seasons": 0,
+            "episodes": 0,
+            "clips": 0
+        }
+        
+        for cartoon_data in data["cartoons"]:
+            # 检查动画片是否已存在
+            existing_cartoon = db.query(Cartoon).filter(Cartoon.id == cartoon_data["id"]).first()
+            if existing_cartoon:
+                if not replace:
+                    continue  # 跳过已存在的
+            
+            # 创建动画片
+            cartoon = Cartoon(
+                id=cartoon_data["id"],
+                name=cartoon_data.get("name", ""),
+                name_cn=cartoon_data.get("name_cn", ""),
+                thumbnail=cartoon_data.get("thumbnail"),
+                description=cartoon_data.get("description"),
+                is_active=cartoon_data.get("is_active", True)
+            )
+            db.add(cartoon)
+            imported_count["cartoons"] += 1
+            
+            # 导入季
+            for season_data in cartoon_data.get("seasons", []):
+                season = Season(
+                    id=season_data["id"],
+                    cartoon_id=cartoon_data["id"],
+                    number=season_data.get("number", 1),
+                    is_active=season_data.get("is_active", True)
+                )
+                db.add(season)
+                imported_count["seasons"] += 1
+                
+                # 导入集
+                for episode_data in season_data.get("episodes", []):
+                    episode = Episode(
+                        id=episode_data["id"],
+                        season_id=season_data["id"],
+                        number=episode_data.get("number", 1),
+                        title=episode_data.get("title"),
+                        title_cn=episode_data.get("title_cn"),
+                        thumbnail=episode_data.get("thumbnail"),
+                        is_active=episode_data.get("is_active", True)
+                    )
+                    db.add(episode)
+                    imported_count["episodes"] += 1
+                    
+                    # 导入配音片段
+                    for clip_data in episode_data.get("clips", []):
+                        clip = DubbingClip(
+                            id=clip_data["id"],
+                            episode_id=episode_data["id"],
+                            order=clip_data.get("order", 1),
+                            video_url=clip_data.get("video_url"),
+                            original_text=clip_data.get("original_text", ""),
+                            translation_cn=clip_data.get("translation_cn"),
+                            start_time=clip_data.get("start_time", 0),
+                            end_time=clip_data.get("end_time", 0),
+                            character=clip_data.get("character"),
+                            is_active=clip_data.get("is_active", True)
+                        )
+                        db.add(clip)
+                        imported_count["clips"] += 1
+        
+        db.commit()
+        return {
+            "message": "导入成功",
+            "imported": imported_count
+        }
+        
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="无效的JSON文件")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")

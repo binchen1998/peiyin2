@@ -139,6 +139,11 @@
             gap: 8px;
         }
 
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
         /* 按钮 */
         .btn {
             padding: 10px 20px;
@@ -374,42 +379,6 @@
             gap: 12px;
         }
 
-        /* 面包屑导航 */
-        .breadcrumb {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 14px;
-            color: var(--text-secondary);
-            margin-bottom: 16px;
-        }
-
-        .breadcrumb a {
-            color: var(--primary);
-            text-decoration: none;
-        }
-
-        .breadcrumb a:hover {
-            text-decoration: underline;
-        }
-
-        /* 空状态 */
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: var(--text-secondary);
-        }
-
-        .empty-state .icon {
-            font-size: 64px;
-            margin-bottom: 16px;
-        }
-
-        .empty-state p {
-            font-size: 16px;
-            margin-bottom: 20px;
-        }
-
         /* 统计卡片 */
         .stats-grid {
             display: grid;
@@ -448,6 +417,176 @@
             color: var(--text-secondary);
         }
 
+        /* 树形目录样式 */
+        .tree-container {
+            background: var(--card);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .tree-item {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .tree-item:last-child {
+            border-bottom: none;
+        }
+
+        .tree-header {
+            display: flex;
+            align-items: center;
+            padding: 16px 20px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .tree-header:hover {
+            background: var(--bg-secondary);
+        }
+
+        .tree-toggle {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            transition: transform 0.2s;
+        }
+
+        .tree-toggle.expanded {
+            transform: rotate(90deg);
+        }
+
+        .tree-icon {
+            font-size: 20px;
+            margin-right: 12px;
+        }
+
+        .tree-info {
+            flex: 1;
+        }
+
+        .tree-title {
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        .tree-subtitle {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .tree-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .tree-children {
+            display: none;
+            padding-left: 20px;
+            background: var(--bg-secondary);
+        }
+
+        .tree-children.expanded {
+            display: block;
+        }
+
+        .tree-child {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .tree-child:last-child {
+            border-bottom: none;
+        }
+
+        .tree-child .tree-header {
+            padding: 12px 20px;
+        }
+
+        .tree-grandchildren {
+            display: none;
+            padding-left: 20px;
+            background: rgba(0,0,0,0.02);
+        }
+
+        .tree-grandchildren.expanded {
+            display: block;
+        }
+
+        .tree-grandchild {
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+        }
+
+        .tree-grandchild:last-child {
+            border-bottom: none;
+        }
+
+        .tree-grandchild .tree-header {
+            padding: 10px 20px;
+        }
+
+        .tree-clips {
+            display: none;
+            padding: 12px 20px;
+            background: rgba(0,0,0,0.03);
+        }
+
+        .tree-clips.expanded {
+            display: block;
+        }
+
+        .clip-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            background: var(--card);
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        .clip-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .clip-order {
+            width: 28px;
+            height: 28px;
+            background: var(--primary);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 12px;
+        }
+
+        .clip-info {
+            flex: 1;
+        }
+
+        .clip-text {
+            font-size: 14px;
+            color: var(--text);
+        }
+
+        .clip-translation {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .clip-meta {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
         /* 缩略图 */
         .thumbnail {
             width: 60px;
@@ -455,6 +594,7 @@
             border-radius: 6px;
             object-fit: cover;
             background: var(--bg-secondary);
+            margin-right: 12px;
         }
 
         /* 操作按钮组 */
@@ -473,6 +613,28 @@
             text-align: center;
             padding: 40px;
             color: var(--text-secondary);
+        }
+
+        /* 空状态 */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state .icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+        }
+
+        .empty-state p {
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+
+        /* 文件输入 */
+        .file-input {
+            display: none;
         }
 
         /* 选择器样式 */
@@ -517,18 +679,6 @@
                     <span class="icon">🎬</span>
                     <span>动画片管理</span>
                 </li>
-                <li data-page="seasons">
-                    <span class="icon">📺</span>
-                    <span>季管理</span>
-                </li>
-                <li data-page="episodes">
-                    <span class="icon">🎞️</span>
-                    <span>集管理</span>
-                </li>
-                <li data-page="clips">
-                    <span class="icon">🎤</span>
-                    <span>配音片段</span>
-                </li>
                 <li data-page="records">
                     <span class="icon">📝</span>
                     <span>配音记录</span>
@@ -559,15 +709,16 @@
         </div>
     </div>
 
+    <!-- 隐藏的文件输入 -->
+    <input type="file" id="import-file" class="file-input" accept=".json" onchange="handleImportFile(event)">
+
     <script>
         // API 基础地址
         const API_BASE = '';
 
         // 当前页面状态
         let currentPage = 'dashboard';
-        let currentCartoonId = null;
-        let currentSeasonId = null;
-        let currentEpisodeId = null;
+        let allData = { cartoons: [], seasons: [], episodes: [], clips: [] };
 
         // 页面切换
         document.querySelectorAll('.sidebar-menu li').forEach(item => {
@@ -595,16 +746,7 @@
                     await loadDashboard();
                     break;
                 case 'cartoons':
-                    await loadCartoons();
-                    break;
-                case 'seasons':
-                    await loadSeasons();
-                    break;
-                case 'episodes':
-                    await loadEpisodes();
-                    break;
-                case 'clips':
-                    await loadClips();
+                    await loadCartoonsTree();
                     break;
                 case 'records':
                     await loadRecords();
@@ -624,6 +766,18 @@
             } catch (e) {
                 console.error('加载统计失败:', e);
             }
+        }
+
+        // 加载所有数据
+        async function loadAllData() {
+            const [cartoons, seasons, episodes, clips] = await Promise.all([
+                fetch(`${API_BASE}/admin/cartoons`).then(r => r.json()),
+                fetch(`${API_BASE}/admin/seasons`).then(r => r.json()),
+                fetch(`${API_BASE}/admin/episodes`).then(r => r.json()),
+                fetch(`${API_BASE}/admin/clips`).then(r => r.json())
+            ]);
+            allData = { cartoons, seasons, episodes, clips };
+            return allData;
         }
 
         // 数据概览页面
@@ -707,54 +861,176 @@
             `;
         }
 
-        // 动画片管理
-        async function loadCartoons() {
-            const res = await fetch(`${API_BASE}/admin/cartoons`);
-            const cartoons = await res.json();
+        // 动画片树形管理
+        async function loadCartoonsTree() {
+            await loadAllData();
+            const { cartoons, seasons, episodes, clips } = allData;
 
             const content = document.getElementById('content');
             content.innerHTML = `
                 <div class="content-header">
                     <h2>🎬 动画片管理</h2>
-                    <button class="btn btn-primary" onclick="showCartoonForm()">
-                        ➕ 新增动画片
-                    </button>
-                </div>
-
-                <div class="card">
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>缩略图</th>
-                                    <th>ID</th>
-                                    <th>中文名</th>
-                                    <th>英文名</th>
-                                    <th>季数</th>
-                                    <th>状态</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${cartoons.map(c => `
-                                    <tr>
-                                        <td><img class="thumbnail" src="${c.thumbnail || 'https://via.placeholder.com/60x40'}" alt=""></td>
-                                        <td>${c.id}</td>
-                                        <td><strong>${c.name_cn}</strong></td>
-                                        <td>${c.name}</td>
-                                        <td>${c.season_count}</td>
-                                        <td><span class="badge ${c.is_active ? 'badge-success' : 'badge-danger'}">${c.is_active ? '启用' : '禁用'}</span></td>
-                                        <td class="action-btns">
-                                            <button class="btn btn-outline btn-sm" onclick="showCartoonForm('${c.id}')">编辑</button>
-                                            <button class="btn btn-danger btn-sm" onclick="deleteCartoon('${c.id}')">删除</button>
-                                        </td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
+                    <div class="header-actions">
+                        <button class="btn btn-outline" onclick="exportData()">📤 导出JSON</button>
+                        <button class="btn btn-outline" onclick="importData()">📥 导入JSON</button>
+                        <button class="btn btn-primary" onclick="showCartoonForm()">➕ 新增动画片</button>
                     </div>
                 </div>
+
+                <div class="tree-container">
+                    ${cartoons.length === 0 ? '<div class="empty-state"><div class="icon">🎬</div><p>还没有动画片，点击上方按钮添加</p></div>' : ''}
+                    ${cartoons.map(cartoon => {
+                        const cartoonSeasons = seasons.filter(s => s.cartoon_id === cartoon.id).sort((a, b) => a.number - b.number);
+                        return `
+                            <div class="tree-item" data-id="${cartoon.id}">
+                                <div class="tree-header" onclick="toggleTree(this)">
+                                    <div class="tree-toggle ${cartoonSeasons.length > 0 ? '' : 'hidden'}">▶</div>
+                                    <img class="thumbnail" src="${cartoon.thumbnail || 'https://via.placeholder.com/60x40'}" alt="">
+                                    <div class="tree-info">
+                                        <div class="tree-title">${cartoon.name_cn}</div>
+                                        <div class="tree-subtitle">${cartoon.name} · ${cartoonSeasons.length}季 · <span class="badge ${cartoon.is_active ? 'badge-success' : 'badge-danger'}">${cartoon.is_active ? '启用' : '禁用'}</span></div>
+                                    </div>
+                                    <div class="tree-actions" onclick="event.stopPropagation()">
+                                        <button class="btn btn-outline btn-sm" onclick="showSeasonForm('${cartoon.id}')">➕ 季</button>
+                                        <button class="btn btn-outline btn-sm" onclick="showCartoonForm('${cartoon.id}')">编辑</button>
+                                        <button class="btn btn-danger btn-sm" onclick="deleteCartoon('${cartoon.id}')">删除</button>
+                                    </div>
+                                </div>
+                                <div class="tree-children">
+                                    ${cartoonSeasons.map(season => {
+                                        const seasonEpisodes = episodes.filter(e => e.season_id === season.id).sort((a, b) => a.number - b.number);
+                                        return `
+                                            <div class="tree-child" data-id="${season.id}">
+                                                <div class="tree-header" onclick="toggleTree(this)">
+                                                    <div class="tree-toggle ${seasonEpisodes.length > 0 ? '' : 'hidden'}">▶</div>
+                                                    <span class="tree-icon">📺</span>
+                                                    <div class="tree-info">
+                                                        <div class="tree-title">第 ${season.number} 季</div>
+                                                        <div class="tree-subtitle">${seasonEpisodes.length}集 · <span class="badge ${season.is_active ? 'badge-success' : 'badge-danger'}">${season.is_active ? '启用' : '禁用'}</span></div>
+                                                    </div>
+                                                    <div class="tree-actions" onclick="event.stopPropagation()">
+                                                        <button class="btn btn-outline btn-sm" onclick="showEpisodeForm('${season.id}')">➕ 集</button>
+                                                        <button class="btn btn-outline btn-sm" onclick="showSeasonFormEdit('${season.id}')">编辑</button>
+                                                        <button class="btn btn-danger btn-sm" onclick="deleteSeason('${season.id}')">删除</button>
+                                                    </div>
+                                                </div>
+                                                <div class="tree-grandchildren">
+                                                    ${seasonEpisodes.map(episode => {
+                                                        const episodeClips = clips.filter(c => c.episode_id === episode.id).sort((a, b) => a.order - b.order);
+                                                        return `
+                                                            <div class="tree-grandchild" data-id="${episode.id}">
+                                                                <div class="tree-header" onclick="toggleTree(this)">
+                                                                    <div class="tree-toggle ${episodeClips.length > 0 ? '' : 'hidden'}">▶</div>
+                                                                    <img class="thumbnail" src="${episode.thumbnail || 'https://via.placeholder.com/60x40'}" alt="">
+                                                                    <div class="tree-info">
+                                                                        <div class="tree-title">第 ${episode.number} 集 ${episode.title_cn ? '- ' + episode.title_cn : ''}</div>
+                                                                        <div class="tree-subtitle">${episode.title || ''} · ${episodeClips.length}个片段 · <span class="badge ${episode.is_active ? 'badge-success' : 'badge-danger'}">${episode.is_active ? '启用' : '禁用'}</span></div>
+                                                                    </div>
+                                                                    <div class="tree-actions" onclick="event.stopPropagation()">
+                                                                        <button class="btn btn-outline btn-sm" onclick="showClipForm('${episode.id}')">➕ 片段</button>
+                                                                        <button class="btn btn-outline btn-sm" onclick="showEpisodeFormEdit('${episode.id}')">编辑</button>
+                                                                        <button class="btn btn-danger btn-sm" onclick="deleteEpisode('${episode.id}')">删除</button>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="tree-clips">
+                                                                    ${episodeClips.length === 0 ? '<div style="padding: 12px; color: var(--text-secondary); text-align: center;">暂无配音片段</div>' : ''}
+                                                                    ${episodeClips.map(clip => `
+                                                                        <div class="clip-item">
+                                                                            <div class="clip-order">${clip.order}</div>
+                                                                            <div class="clip-info">
+                                                                                <div class="clip-text">"${clip.original_text}"</div>
+                                                                                <div class="clip-translation">${clip.translation_cn || ''}</div>
+                                                                                <div class="clip-meta">${clip.character || '未知角色'} · ${(clip.end_time - clip.start_time).toFixed(1)}秒</div>
+                                                                            </div>
+                                                                            <div class="tree-actions">
+                                                                                <button class="btn btn-outline btn-sm" onclick="showClipFormEdit('${clip.id}')">编辑</button>
+                                                                                <button class="btn btn-danger btn-sm" onclick="deleteClip('${clip.id}')">删除</button>
+                                                                            </div>
+                                                                        </div>
+                                                                    `).join('')}
+                                                                </div>
+                                                            </div>
+                                                        `;
+                                                    }).join('')}
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
             `;
+        }
+
+        // 切换树形展开/折叠
+        function toggleTree(header) {
+            const toggle = header.querySelector('.tree-toggle');
+            const parent = header.parentElement;
+            const children = parent.querySelector('.tree-children, .tree-grandchildren, .tree-clips');
+            
+            if (children && !toggle.classList.contains('hidden')) {
+                toggle.classList.toggle('expanded');
+                children.classList.toggle('expanded');
+            }
+        }
+
+        // 导出数据
+        async function exportData() {
+            try {
+                const res = await fetch(`${API_BASE}/admin/export`);
+                const data = await res.json();
+                
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `peiyin_export_${new Date().toISOString().slice(0,10)}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                
+                alert('导出成功！');
+            } catch (e) {
+                alert('导出失败: ' + e.message);
+            }
+        }
+
+        // 导入数据
+        function importData() {
+            document.getElementById('import-file').click();
+        }
+
+        async function handleImportFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const replace = confirm('是否替换现有数据？\n\n点击"确定"将删除所有现有数据后导入\n点击"取消"将只添加不存在的数据');
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('replace', replace);
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/import`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await res.json();
+                
+                if (res.ok) {
+                    alert(`导入成功！\n动画片: ${result.imported.cartoons}\n季: ${result.imported.seasons}\n集: ${result.imported.episodes}\n片段: ${result.imported.clips}`);
+                    loadCartoonsTree();
+                    loadStats();
+                } else {
+                    alert('导入失败: ' + (result.detail || '未知错误'));
+                }
+            } catch (e) {
+                alert('导入失败: ' + e.message);
+            }
+            
+            event.target.value = '';
         }
 
         // 显示动画片表单
@@ -824,7 +1100,7 @@
 
                 if (res.ok) {
                     closeModal();
-                    loadCartoons();
+                    loadCartoonsTree();
                     loadStats();
                 } else {
                     const err = await res.json();
@@ -842,7 +1118,7 @@
             try {
                 const res = await fetch(`${API_BASE}/admin/cartoons/${id}`, { method: 'DELETE' });
                 if (res.ok) {
-                    loadCartoons();
+                    loadCartoonsTree();
                     loadStats();
                 }
             } catch (e) {
@@ -850,84 +1126,48 @@
             }
         }
 
-        // 季管理
-        async function loadSeasons() {
-            const cartoonsRes = await fetch(`${API_BASE}/admin/cartoons`);
-            const cartoons = await cartoonsRes.json();
-
-            const seasonsRes = await fetch(`${API_BASE}/admin/seasons`);
-            const seasons = await seasonsRes.json();
-
-            const content = document.getElementById('content');
-            content.innerHTML = `
-                <div class="content-header">
-                    <h2>📺 季管理</h2>
-                    <button class="btn btn-primary" onclick="showSeasonForm()">
-                        ➕ 新增季
-                    </button>
-                </div>
-
-                <div class="card">
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>所属动画片</th>
-                                    <th>季数</th>
-                                    <th>集数</th>
-                                    <th>状态</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${seasons.map(s => {
-                                    const cartoon = cartoons.find(c => c.id === s.cartoon_id);
-                                    return `
-                                        <tr>
-                                            <td>${s.id}</td>
-                                            <td>${cartoon ? cartoon.name_cn : s.cartoon_id}</td>
-                                            <td><strong>第 ${s.number} 季</strong></td>
-                                            <td>${s.episode_count}</td>
-                                            <td><span class="badge ${s.is_active ? 'badge-success' : 'badge-danger'}">${s.is_active ? '启用' : '禁用'}</span></td>
-                                            <td class="action-btns">
-                                                <button class="btn btn-outline btn-sm" onclick="showSeasonForm('${s.id}', '${s.cartoon_id}', ${s.number}, ${s.is_active})">编辑</button>
-                                                <button class="btn btn-danger btn-sm" onclick="deleteSeason('${s.id}')">删除</button>
-                                            </td>
-                                        </tr>
-                                    `;
-                                }).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
-        }
-
         // 显示季表单
-        async function showSeasonForm(id = null, cartoonId = '', number = 1, isActive = true) {
-            const cartoonsRes = await fetch(`${API_BASE}/admin/cartoons`);
-            const cartoons = await cartoonsRes.json();
-
-            document.getElementById('modal-title').textContent = id ? '编辑季' : '新增季';
+        function showSeasonForm(cartoonId) {
+            document.getElementById('modal-title').textContent = '新增季';
             document.getElementById('modal-body').innerHTML = `
                 <div class="form-group">
                     <label class="form-label">ID（如：peppa-s1）</label>
-                    <input type="text" class="form-input" id="form-id" value="${id || ''}" ${id ? 'disabled' : ''}>
+                    <input type="text" class="form-input" id="form-id" value="${cartoonId}-s${Date.now() % 100}">
                 </div>
-                <div class="form-group">
-                    <label class="form-label">所属动画片</label>
-                    <select class="form-input" id="form-cartoon-id" ${id ? 'disabled' : ''}>
-                        ${cartoons.map(c => `<option value="${c.id}" ${c.id === cartoonId ? 'selected' : ''}>${c.name_cn} (${c.id})</option>`).join('')}
-                    </select>
-                </div>
+                <input type="hidden" id="form-cartoon-id" value="${cartoonId}">
                 <div class="form-group">
                     <label class="form-label">季数</label>
-                    <input type="number" class="form-input" id="form-number" value="${number}" min="1">
+                    <input type="number" class="form-input" id="form-number" value="1" min="1">
                 </div>
                 <div class="form-group">
                     <label class="form-label">
-                        <input type="checkbox" id="form-active" ${isActive ? 'checked' : ''}> 启用
+                        <input type="checkbox" id="form-active" checked> 启用
+                    </label>
+                </div>
+            `;
+
+            document.getElementById('modal-submit').onclick = () => saveSeason(null);
+            openModal();
+        }
+
+        async function showSeasonFormEdit(id) {
+            const season = allData.seasons.find(s => s.id === id);
+            if (!season) return;
+
+            document.getElementById('modal-title').textContent = '编辑季';
+            document.getElementById('modal-body').innerHTML = `
+                <div class="form-group">
+                    <label class="form-label">ID</label>
+                    <input type="text" class="form-input" id="form-id" value="${season.id}" disabled>
+                </div>
+                <input type="hidden" id="form-cartoon-id" value="${season.cartoon_id}">
+                <div class="form-group">
+                    <label class="form-label">季数</label>
+                    <input type="number" class="form-input" id="form-number" value="${season.number}" min="1">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">
+                        <input type="checkbox" id="form-active" ${season.is_active ? 'checked' : ''}> 启用
                     </label>
                 </div>
             `;
@@ -957,7 +1197,7 @@
 
                 if (res.ok) {
                     closeModal();
-                    loadSeasons();
+                    loadCartoonsTree();
                     loadStats();
                 } else {
                     const err = await res.json();
@@ -975,7 +1215,7 @@
             try {
                 const res = await fetch(`${API_BASE}/admin/seasons/${id}`, { method: 'DELETE' });
                 if (res.ok) {
-                    loadSeasons();
+                    loadCartoonsTree();
                     loadStats();
                 }
             } catch (e) {
@@ -983,78 +1223,15 @@
             }
         }
 
-        // 集管理
-        async function loadEpisodes() {
-            const seasonsRes = await fetch(`${API_BASE}/admin/seasons`);
-            const seasons = await seasonsRes.json();
-
-            const episodesRes = await fetch(`${API_BASE}/admin/episodes`);
-            const episodes = await episodesRes.json();
-
-            const content = document.getElementById('content');
-            content.innerHTML = `
-                <div class="content-header">
-                    <h2>🎞️ 集管理</h2>
-                    <button class="btn btn-primary" onclick="showEpisodeForm()">
-                        ➕ 新增集
-                    </button>
-                </div>
-
-                <div class="card">
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>缩略图</th>
-                                    <th>ID</th>
-                                    <th>所属季</th>
-                                    <th>集数</th>
-                                    <th>中文标题</th>
-                                    <th>片段数</th>
-                                    <th>状态</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${episodes.map(e => `
-                                    <tr>
-                                        <td><img class="thumbnail" src="${e.thumbnail || 'https://via.placeholder.com/60x40'}" alt=""></td>
-                                        <td>${e.id}</td>
-                                        <td>${e.season_id}</td>
-                                        <td><strong>第 ${e.number} 集</strong></td>
-                                        <td>${e.title_cn || '-'}</td>
-                                        <td>${e.clip_count}</td>
-                                        <td><span class="badge ${e.is_active ? 'badge-success' : 'badge-danger'}">${e.is_active ? '启用' : '禁用'}</span></td>
-                                        <td class="action-btns">
-                                            <button class="btn btn-outline btn-sm" onclick="showEpisodeFormEdit('${e.id}')">编辑</button>
-                                            <button class="btn btn-danger btn-sm" onclick="deleteEpisode('${e.id}')">删除</button>
-                                        </td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
-        }
-
         // 显示集表单
-        async function showEpisodeForm() {
-            const seasonsRes = await fetch(`${API_BASE}/admin/seasons`);
-            const seasons = await seasonsRes.json();
-
+        function showEpisodeForm(seasonId) {
             document.getElementById('modal-title').textContent = '新增集';
             document.getElementById('modal-body').innerHTML = `
                 <div class="form-group">
                     <label class="form-label">ID（如：peppa-s1-e1）</label>
-                    <input type="text" class="form-input" id="form-id" value="">
+                    <input type="text" class="form-input" id="form-id" value="${seasonId}-e${Date.now() % 100}">
                 </div>
-                <div class="form-group">
-                    <label class="form-label">所属季</label>
-                    <select class="form-input" id="form-season-id">
-                        ${seasons.map(s => `<option value="${s.id}">${s.id} (第${s.number}季)</option>`).join('')}
-                    </select>
-                </div>
+                <input type="hidden" id="form-season-id" value="${seasonId}">
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">集数</label>
@@ -1087,13 +1264,8 @@
         }
 
         async function showEpisodeFormEdit(id) {
-            const res = await fetch(`${API_BASE}/admin/episodes`);
-            const episodes = await res.json();
-            const episode = episodes.find(e => e.id === id);
+            const episode = allData.episodes.find(e => e.id === id);
             if (!episode) return;
-
-            const seasonsRes = await fetch(`${API_BASE}/admin/seasons`);
-            const seasons = await seasonsRes.json();
 
             document.getElementById('modal-title').textContent = '编辑集';
             document.getElementById('modal-body').innerHTML = `
@@ -1101,12 +1273,7 @@
                     <label class="form-label">ID</label>
                     <input type="text" class="form-input" id="form-id" value="${episode.id}" disabled>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">所属季</label>
-                    <select class="form-input" id="form-season-id" disabled>
-                        ${seasons.map(s => `<option value="${s.id}" ${s.id === episode.season_id ? 'selected' : ''}>${s.id}</option>`).join('')}
-                    </select>
-                </div>
+                <input type="hidden" id="form-season-id" value="${episode.season_id}">
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">集数</label>
@@ -1162,7 +1329,7 @@
 
                 if (res.ok) {
                     closeModal();
-                    loadEpisodes();
+                    loadCartoonsTree();
                     loadStats();
                 } else {
                     const err = await res.json();
@@ -1180,7 +1347,7 @@
             try {
                 const res = await fetch(`${API_BASE}/admin/episodes/${id}`, { method: 'DELETE' });
                 if (res.ok) {
-                    loadEpisodes();
+                    loadCartoonsTree();
                     loadStats();
                 }
             } catch (e) {
@@ -1188,66 +1355,8 @@
             }
         }
 
-        // 配音片段管理
-        async function loadClips() {
-            const episodesRes = await fetch(`${API_BASE}/admin/episodes`);
-            const episodes = await episodesRes.json();
-
-            const clipsRes = await fetch(`${API_BASE}/admin/clips`);
-            const clips = await clipsRes.json();
-
-            const content = document.getElementById('content');
-            content.innerHTML = `
-                <div class="content-header">
-                    <h2>🎤 配音片段管理</h2>
-                    <button class="btn btn-primary" onclick="showClipForm()">
-                        ➕ 新增片段
-                    </button>
-                </div>
-
-                <div class="card">
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>所属集</th>
-                                    <th>顺序</th>
-                                    <th>角色</th>
-                                    <th>原文</th>
-                                    <th>时长</th>
-                                    <th>状态</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${clips.map(c => `
-                                    <tr>
-                                        <td>${c.id}</td>
-                                        <td>${c.episode_id}</td>
-                                        <td>${c.order}</td>
-                                        <td>${c.character || '-'}</td>
-                                        <td title="${c.original_text}">${c.original_text.substring(0, 30)}${c.original_text.length > 30 ? '...' : ''}</td>
-                                        <td>${(c.end_time - c.start_time).toFixed(1)}s</td>
-                                        <td><span class="badge ${c.is_active ? 'badge-success' : 'badge-danger'}">${c.is_active ? '启用' : '禁用'}</span></td>
-                                        <td class="action-btns">
-                                            <button class="btn btn-outline btn-sm" onclick="showClipFormEdit('${c.id}')">编辑</button>
-                                            <button class="btn btn-danger btn-sm" onclick="deleteClip('${c.id}')">删除</button>
-                                        </td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
-        }
-
         // 显示片段表单
-        async function showClipForm() {
-            const episodesRes = await fetch(`${API_BASE}/admin/episodes`);
-            const episodes = await episodesRes.json();
-
+        function showClipForm(episodeId) {
             document.getElementById('modal-title').textContent = '新增配音片段';
             document.getElementById('modal-body').innerHTML = `
                 <div class="form-row">
@@ -1255,22 +1364,15 @@
                         <label class="form-label">ID</label>
                         <input type="text" class="form-input" id="form-id" value="clip-${Date.now()}">
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">所属集</label>
-                        <select class="form-input" id="form-episode-id">
-                            ${episodes.map(e => `<option value="${e.id}">${e.id} - ${e.title_cn || e.title || ''}</option>`).join('')}
-                        </select>
-                    </div>
-                </div>
-                <div class="form-row">
+                    <input type="hidden" id="form-episode-id" value="${episodeId}">
                     <div class="form-group">
                         <label class="form-label">顺序</label>
                         <input type="number" class="form-input" id="form-order" value="1" min="1">
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">角色名</label>
-                        <input type="text" class="form-input" id="form-character" value="">
-                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">角色名</label>
+                    <input type="text" class="form-input" id="form-character" value="">
                 </div>
                 <div class="form-group">
                     <label class="form-label">原文（英文）</label>
@@ -1306,11 +1408,8 @@
         }
 
         async function showClipFormEdit(id) {
-            const res = await fetch(`${API_BASE}/admin/clips/${id}`);
-            const clip = await res.json();
-
-            const episodesRes = await fetch(`${API_BASE}/admin/episodes`);
-            const episodes = await episodesRes.json();
+            const clip = allData.clips.find(c => c.id === id);
+            if (!clip) return;
 
             document.getElementById('modal-title').textContent = '编辑配音片段';
             document.getElementById('modal-body').innerHTML = `
@@ -1319,22 +1418,15 @@
                         <label class="form-label">ID</label>
                         <input type="text" class="form-input" id="form-id" value="${clip.id}" disabled>
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">所属集</label>
-                        <select class="form-input" id="form-episode-id" disabled>
-                            ${episodes.map(e => `<option value="${e.id}" ${e.id === clip.episode_id ? 'selected' : ''}>${e.id}</option>`).join('')}
-                        </select>
-                    </div>
-                </div>
-                <div class="form-row">
+                    <input type="hidden" id="form-episode-id" value="${clip.episode_id}">
                     <div class="form-group">
                         <label class="form-label">顺序</label>
                         <input type="number" class="form-input" id="form-order" value="${clip.order}" min="1">
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">角色名</label>
-                        <input type="text" class="form-input" id="form-character" value="${clip.character || ''}">
-                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">角色名</label>
+                    <input type="text" class="form-input" id="form-character" value="${clip.character || ''}">
                 </div>
                 <div class="form-group">
                     <label class="form-label">原文（英文）</label>
@@ -1396,7 +1488,7 @@
 
                 if (res.ok) {
                     closeModal();
-                    loadClips();
+                    loadCartoonsTree();
                     loadStats();
                 } else {
                     const err = await res.json();
@@ -1414,7 +1506,7 @@
             try {
                 const res = await fetch(`${API_BASE}/admin/clips/${id}`, { method: 'DELETE' });
                 if (res.ok) {
-                    loadClips();
+                    loadCartoonsTree();
                     loadStats();
                 }
             } catch (e) {
