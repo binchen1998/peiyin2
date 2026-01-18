@@ -4,6 +4,9 @@ uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 pydantic==2.5.3
 
+# 数据库
+sqlalchemy==2.0.25
+
 # 语音处理
 vosk==0.3.45
 pydub==0.25.1

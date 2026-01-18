@@ -10,12 +10,17 @@ import logging
 from typing import Optional
 from pathlib import Path
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from scoring import VoskScorer, ScoringResult
+from database import init_db, get_db, init_sample_data, DubbingRecord
+from admin_routes import router as admin_router
+from app_routes import router as app_router
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -37,13 +42,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 挂载静态文件目录
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(STATIC_DIR, exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+# 注册路由
+app.include_router(admin_router)
+app.include_router(app_router)
+
 # 初始化评分器
 scorer: Optional[VoskScorer] = None
 
 @app.on_event("startup")
 async def startup_event():
-    """应用启动时初始化评分器"""
+    """应用启动时初始化"""
     global scorer
+    
+    # 初始化数据库
+    init_db()
+    
+    # 初始化示例数据
+    db = next(get_db())
+    init_sample_data(db)
+    db.close()
+    
+    # 初始化 Vosk 评分器
     try:
         model_path = os.environ.get("VOSK_MODEL_PATH", "model")
         scorer = VoskScorer(model_path)
@@ -54,8 +82,26 @@ async def startup_event():
 
 @app.get("/")
 async def root():
-    """根路径"""
-    return {"message": "英语配音评分服务", "status": "running"}
+    """根路径 - 重定向到管理后台"""
+    return HTMLResponse("""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta http-equiv="refresh" content="0; url=/admin.html">
+    </head>
+    <body>
+        <p>正在跳转到管理后台...</p>
+    </body>
+    </html>
+    """)
+
+@app.get("/admin.html")
+async def admin_page():
+    """管理后台页面"""
+    admin_html_path = os.path.join(STATIC_DIR, "admin.html")
+    if os.path.exists(admin_html_path):
+        return FileResponse(admin_html_path)
+    return HTMLResponse("<h1>管理后台文件不存在</h1>", status_code=404)
 
 @app.get("/health")
 async def health_check():
@@ -78,7 +124,9 @@ class ScoreResponse(BaseModel):
 async def score_audio(
     audio: UploadFile = File(...),
     text: str = Form(...),
-    clip_id: str = Form(...)
+    clip_id: str = Form(...),
+    user_id: str = Form(None),
+    db: Session = Depends(get_db)
 ):
     """
     对上传的音频进行评分
@@ -87,6 +135,7 @@ async def score_audio(
         audio: 上传的音频文件
         text: 需要对齐的原文文本
         clip_id: 配音片段ID
+        user_id: 用户ID（可选）
     
     Returns:
         评分结果
@@ -109,6 +158,20 @@ async def score_audio(
             # 模拟评分
             logger.info("使用模拟评分模式")
             result = generate_mock_score(text)
+        
+        # 保存配音记录到数据库
+        try:
+            record = DubbingRecord(
+                clip_id=clip_id,
+                user_id=user_id,
+                score=result["overallScore"],
+                feedback=result["feedback"],
+                word_scores=json.dumps(result["wordScores"])
+            )
+            db.add(record)
+            db.commit()
+        except Exception as e:
+            logger.error(f"保存配音记录失败: {e}")
         
         # 清理临时文件
         try:
