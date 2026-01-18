@@ -32,6 +32,8 @@ export default function DubbingScreen() {
   const [recordingUri, setRecordingUri] = useState<string | null>(null);
   const [scoringResult, setScoringResult] = useState<ScoringResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isPlayingRecording, setIsPlayingRecording] = useState(false);
+  const [playbackSound, setPlaybackSound] = useState<Audio.Sound | null>(null);
 
   useEffect(() => {
     // 请求麦克风权限
@@ -54,7 +56,16 @@ export default function DubbingScreen() {
         recording.stopAndUnloadAsync();
       }
     };
-  }, []);
+  }, [recording]);
+
+  // 清理播放的音频
+  useEffect(() => {
+    return () => {
+      if (playbackSound) {
+        playbackSound.unloadAsync();
+      }
+    };
+  }, [playbackSound]);
 
   if (!clip) {
     return (
@@ -129,11 +140,48 @@ export default function DubbingScreen() {
     if (!recordingUri) return;
 
     try {
-      const { sound } = await Audio.Sound.createAsync({ uri: recordingUri });
-      await sound.playAsync();
+      // 如果正在播放，先停止
+      if (playbackSound) {
+        await playbackSound.stopAsync();
+        await playbackSound.unloadAsync();
+        setPlaybackSound(null);
+        setIsPlayingRecording(false);
+        return;
+      }
+
+      // 切换到播放模式
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        playThroughEarpieceAndroid: false,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+      });
+
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: recordingUri },
+        { shouldPlay: true },
+        (status) => {
+          if (status.isLoaded && status.didJustFinish) {
+            // 播放完成
+            setIsPlayingRecording(false);
+            sound.unloadAsync();
+            setPlaybackSound(null);
+            // 切回录音模式
+            Audio.setAudioModeAsync({
+              allowsRecordingIOS: true,
+              playsInSilentModeIOS: true,
+            });
+          }
+        }
+      );
+      
+      setPlaybackSound(sound);
+      setIsPlayingRecording(true);
     } catch (err) {
       console.error('播放录音失败:', err);
       setError('播放录音失败');
+      setIsPlayingRecording(false);
     }
   };
 
@@ -189,10 +237,24 @@ export default function DubbingScreen() {
     }
   };
 
-  const resetRecording = () => {
+  const resetRecording = async () => {
+    // 停止播放
+    if (playbackSound) {
+      await playbackSound.stopAsync();
+      await playbackSound.unloadAsync();
+      setPlaybackSound(null);
+      setIsPlayingRecording(false);
+    }
+    
     setRecordingUri(null);
     setScoringResult(null);
     setRecordingStatus('idle');
+    
+    // 切回录音模式
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+    });
   };
 
   return (
@@ -296,15 +358,27 @@ export default function DubbingScreen() {
         {recordingStatus === 'recorded' && (
           <View style={styles.controls}>
             <ThemedText style={[styles.hint, { color: colors.textSecondary }]}>
-              录音完成！
+              {isPlayingRecording ? '正在播放...' : '录音完成！'}
             </ThemedText>
             <View style={styles.actionButtons}>
               <Pressable 
-                style={[styles.actionButton, { backgroundColor: colors.backgroundSecondary, borderColor: colors.cardBorder }]}
+                style={[
+                  styles.actionButton, 
+                  { 
+                    backgroundColor: isPlayingRecording ? colors.primary : colors.backgroundSecondary, 
+                    borderColor: colors.cardBorder 
+                  }
+                ]}
                 onPress={playRecording}
               >
-                <IconSymbol name="play.fill" size={24} color={colors.primary} />
-                <ThemedText style={[styles.actionButtonText, { color: colors.text }]}>试听</ThemedText>
+                <IconSymbol 
+                  name={isPlayingRecording ? "stop.fill" : "play.fill"} 
+                  size={24} 
+                  color={isPlayingRecording ? "#FFFFFF" : colors.primary} 
+                />
+                <ThemedText style={[styles.actionButtonText, { color: isPlayingRecording ? "#FFFFFF" : colors.text }]}>
+                  {isPlayingRecording ? '停止' : '试听'}
+                </ThemedText>
               </Pressable>
               <Pressable 
                 style={[styles.actionButton, { backgroundColor: colors.backgroundSecondary, borderColor: colors.cardBorder }]}
