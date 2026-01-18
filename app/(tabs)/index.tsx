@@ -26,13 +26,8 @@ export default function HomeScreen() {
     <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* 顶部标题区域 */}
       <View style={[styles.header, { backgroundColor: colors.primary }]}>
-        <View style={styles.headerContent}>
-          <ThemedText style={styles.headerTitle}>🎬 英语配音乐园</ThemedText>
-          <ThemedText style={styles.headerSubtitle}>选择你喜欢的动画片开始配音吧！</ThemedText>
-        </View>
-        <View style={styles.headerDecoration}>
-          <ThemedText style={styles.decorationEmoji}>🎤</ThemedText>
-        </View>
+        <ThemedText style={styles.headerTitle}>🎬 英语配音乐园</ThemedText>
+        <ThemedText style={styles.headerSubtitle}>选择你喜欢的动画片开始配音吧！</ThemedText>
       </View>
 
       {/* 动画片列表 */}
@@ -119,15 +114,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderBottomLeftRadius: 30,
     borderBottomRightRadius: 30,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerContent: {
-    flex: 1,
   },
   headerTitle: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: 'bold',
     color: '#FFFFFF',
     marginBottom: 8,
@@ -135,17 +124,6 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     fontSize: 14,
     color: 'rgba(255,255,255,0.9)',
-  },
-  headerDecoration: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  decorationEmoji: {
-    fontSize: 30,
   },
   scrollView: {
     flex: 1,
