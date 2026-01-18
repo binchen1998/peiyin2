@@ -429,10 +429,10 @@ export default function DubbingScreen() {
         {recordingStatus === 'scored' && scoringResult && (
           <View style={styles.scoreSection}>
             <View style={[styles.scoreCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+              <ThemedText style={[styles.scoreLabel, { color: colors.textSecondary }]}>
+                总分
+              </ThemedText>
               <View style={styles.scoreHeader}>
-                <ThemedText style={[styles.scoreLabel, { color: colors.textSecondary }]}>
-                  总分
-                </ThemedText>
                 <ThemedText style={[styles.scoreValue, { color: getScoreColor(scoringResult.overallScore ?? 0) }]}>
                   {Math.round(scoringResult.overallScore ?? 0)}
                 </ThemedText>
@@ -656,16 +656,16 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     padding: 20,
   },
-  scoreHeader: {
-    alignItems: 'center',
-    marginBottom: 12,
-  },
   scoreLabel: {
     fontSize: 14,
-    marginBottom: 4,
+    marginBottom: 8,
+  },
+  scoreHeader: {
+    alignItems: 'center',
+    marginBottom: 16,
   },
   scoreValue: {
-    fontSize: 64,
+    fontSize: 72,
     fontWeight: 'bold',
   },
   scoreFeedback: {
