@@ -230,6 +230,8 @@ export default function DubbingScreen() {
       }
 
       const result: ScoringResult = await response.json();
+      console.log('服务器返回的评分结果:', JSON.stringify(result, null, 2));
+      console.log('overallScore 类型:', typeof result.overallScore, '值:', result.overallScore);
       setScoringResult(result);
       setRecordingStatus('scored');
     } catch (err) {
@@ -429,16 +431,16 @@ export default function DubbingScreen() {
             <View style={[styles.scoreCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <View style={styles.scoreHeader}>
                 <ThemedText style={styles.scoreEmoji}>
-                  {scoringResult.overallScore >= 90 ? '🌟' : 
-                   scoringResult.overallScore >= 70 ? '👍' : 
-                   scoringResult.overallScore >= 50 ? '💪' : '🎯'}
+                  {(scoringResult.overallScore ?? 0) >= 90 ? '🌟' : 
+                   (scoringResult.overallScore ?? 0) >= 70 ? '👍' : 
+                   (scoringResult.overallScore ?? 0) >= 50 ? '💪' : '🎯'}
                 </ThemedText>
                 <View style={styles.scoreInfo}>
                   <ThemedText style={[styles.scoreLabel, { color: colors.textSecondary }]}>
                     总分
                   </ThemedText>
-                  <ThemedText style={[styles.scoreValue, { color: getScoreColor(scoringResult.overallScore) }]}>
-                    {scoringResult.overallScore}
+                  <ThemedText style={[styles.scoreValue, { color: getScoreColor(scoringResult.overallScore ?? 0) }]}>
+                    {Math.round(scoringResult.overallScore ?? 0)}
                   </ThemedText>
                 </View>
               </View>

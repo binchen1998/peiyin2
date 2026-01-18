@@ -294,8 +294,8 @@ class VoskScorer:
                 "phonemes": phoneme_scores
             })
         
-        # 计算总分
-        overall_score = total_score // len(expected_words) if expected_words else 0
+        # 计算总分（确保返回整数）
+        overall_score = int(total_score // len(expected_words)) if expected_words else 0
         
         # 生成反馈
         if overall_score >= 90:
@@ -308,7 +308,7 @@ class VoskScorer:
             feedback = "加油！多听多练，你一定可以进步的！"
         
         return {
-            "overallScore": overall_score,
+            "overallScore": int(overall_score),
             "phonemeScores": [],
             "wordScores": word_scores,
             "feedback": feedback
