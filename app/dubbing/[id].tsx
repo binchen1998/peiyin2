@@ -430,23 +430,16 @@ export default function DubbingScreen() {
           <View style={styles.scoreSection}>
             <View style={[styles.scoreCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <View style={styles.scoreHeader}>
-                <ThemedText style={styles.scoreEmoji}>
-                  {(scoringResult.overallScore ?? 0) >= 90 ? '🌟' : 
-                   (scoringResult.overallScore ?? 0) >= 70 ? '👍' : 
-                   (scoringResult.overallScore ?? 0) >= 50 ? '💪' : '🎯'}
+                <ThemedText style={[styles.scoreLabel, { color: colors.textSecondary }]}>
+                  总分
                 </ThemedText>
-                <View style={styles.scoreInfo}>
-                  <ThemedText style={[styles.scoreLabel, { color: colors.textSecondary }]}>
-                    总分
-                  </ThemedText>
-                  <ThemedText style={[styles.scoreValue, { color: getScoreColor(scoringResult.overallScore ?? 0) }]}>
-                    {Math.round(scoringResult.overallScore ?? 0)}
-                  </ThemedText>
-                </View>
+                <ThemedText style={[styles.scoreValue, { color: getScoreColor(scoringResult.overallScore ?? 0) }]}>
+                  {Math.round(scoringResult.overallScore ?? 0)}
+                </ThemedText>
               </View>
               
               <ThemedText style={[styles.scoreFeedback, { color: colors.text }]}>
-                {getScoreFeedback(scoringResult.overallScore)}
+                {getScoreFeedback(scoringResult.overallScore ?? 0)}
               </ThemedText>
 
               {/* 单词评分 */}
@@ -664,30 +657,19 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   scoreHeader: {
-    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
-  },
-  scoreEmoji: {
-    fontSize: 48,
-    width: 60,
-    textAlign: 'center',
-  },
-  scoreInfo: {
-    marginLeft: 16,
-    flex: 1,
+    marginBottom: 12,
   },
   scoreLabel: {
     fontSize: 14,
     marginBottom: 4,
   },
   scoreValue: {
-    fontSize: 42,
+    fontSize: 64,
     fontWeight: 'bold',
-    lineHeight: 50,
   },
   scoreFeedback: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: 20,
