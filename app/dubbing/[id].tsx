@@ -12,6 +12,7 @@ import { getDubbingClip } from '@/data/mock-data';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ScoringResult } from '@/types';
 import { API_BASE_URL } from '@/config/api';
+import { getUserId } from '@/hooks/use-user-profile';
 
 const { width } = Dimensions.get('window');
 
@@ -205,6 +206,7 @@ export default function DubbingScreen() {
     setError(null);
 
     try {
+      const userId = await getUserId();
       const formData = new FormData();
       
       // 添加音频文件
@@ -216,6 +218,7 @@ export default function DubbingScreen() {
       formData.append('audio', audioFile);
       formData.append('text', clip.originalText);
       formData.append('clip_id', clip.id);
+      formData.append('user_id', userId);
 
       const response = await fetch(`${API_BASE_URL}/api/score`, {
         method: 'POST',

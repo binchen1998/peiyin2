@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import 'react-native-get-random-values';
+import { v4 as uuidv4 } from 'uuid';
 
 const USER_PROFILE_KEY = '@user_profile';
+const USER_ID_KEY = '@user_id';
 
 export interface UserProfile {
   nickname: string;
@@ -14,6 +17,21 @@ const defaultProfile: UserProfile = {
   avatarUri: null,
   birthDate: null,
 };
+
+// 获取或生成用户唯一ID
+export async function getUserId(): Promise<string> {
+  try {
+    let userId = await AsyncStorage.getItem(USER_ID_KEY);
+    if (!userId) {
+      userId = uuidv4();
+      await AsyncStorage.setItem(USER_ID_KEY, userId);
+    }
+    return userId;
+  } catch (error) {
+    console.error('获取用户ID失败:', error);
+    return 'anonymous';
+  }
+}
 
 export function useUserProfile() {
   const [profile, setProfile] = useState<UserProfile>(defaultProfile);

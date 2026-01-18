@@ -4,13 +4,16 @@ App 前端 API 路由
 """
 
 from typing import List, Optional
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func, distinct
 
-from database import get_db, Cartoon, Season, Episode, DubbingClip
+from database import get_db, Cartoon, Season, Episode, DubbingClip, DubbingRecord
 from schemas import (
     AppCartoonResponse, AppSeasonResponse, 
-    AppEpisodeResponse, AppDubbingClipResponse
+    AppEpisodeResponse, AppDubbingClipResponse,
+    UserLearningStatsResponse
 )
 
 router = APIRouter(prefix="/api/app", tags=["App接口"])
@@ -136,4 +139,33 @@ def get_clip(clip_id: str, db: Session = Depends(get_db)):
         startTime=clip.start_time,
         endTime=clip.end_time,
         character=clip.character
+    )
+
+
+@router.get("/user/{user_id}/stats", response_model=UserLearningStatsResponse)
+def get_user_stats(user_id: str, db: Session = Depends(get_db)):
+    """获取用户学习统计"""
+    # 配音次数
+    dubbing_count = db.query(DubbingRecord).filter(
+        DubbingRecord.user_id == user_id
+    ).count()
+    
+    # 平均分数
+    avg_result = db.query(func.avg(DubbingRecord.score)).filter(
+        DubbingRecord.user_id == user_id,
+        DubbingRecord.score.isnot(None)
+    ).scalar()
+    average_score = int(avg_result) if avg_result else 0
+    
+    # 学习天数（不同日期数）
+    learning_days = db.query(
+        func.count(distinct(func.date(DubbingRecord.created_at)))
+    ).filter(
+        DubbingRecord.user_id == user_id
+    ).scalar() or 0
+    
+    return UserLearningStatsResponse(
+        dubbing_count=dubbing_count,
+        average_score=average_score,
+        learning_days=learning_days
     )

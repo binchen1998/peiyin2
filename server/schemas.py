@@ -190,6 +190,14 @@ class StatsResponse(BaseModel):
     recent_records: List[DubbingRecordResponse]
 
 
+# ===== 用户学习统计 =====
+class UserLearningStatsResponse(BaseModel):
+    """用户学习统计"""
+    dubbing_count: int  # 配音次数
+    average_score: int  # 平均分数
+    learning_days: int  # 学习天数
+
+
 # ===== App API 响应 =====
 class AppCartoonResponse(BaseModel):
     id: str

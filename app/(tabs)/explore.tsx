@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   StyleSheet, 
   ScrollView, 
@@ -12,13 +12,21 @@ import {
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { useFocusEffect } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { useUserProfile } from '@/hooks/use-user-profile';
+import { useUserProfile, getUserId } from '@/hooks/use-user-profile';
+import { API_BASE_URL } from '@/config/api';
+
+interface LearningStats {
+  dubbingCount: number;
+  averageScore: number;
+  learningDays: number;
+}
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? 'light';
@@ -29,8 +37,38 @@ export default function ProfileScreen() {
   const [editNickname, setEditNickname] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [stats, setStats] = useState<LearningStats>({
+    dubbingCount: 0,
+    averageScore: 0,
+    learningDays: 0,
+  });
 
   const age = getAge();
+
+  // 获取学习统计
+  const fetchStats = async () => {
+    try {
+      const userId = await getUserId();
+      const response = await fetch(`${API_BASE_URL}/api/app/user/${userId}/stats`);
+      if (response.ok) {
+        const data = await response.json();
+        setStats({
+          dubbingCount: data.dubbing_count,
+          averageScore: data.average_score,
+          learningDays: data.learning_days,
+        });
+      }
+    } catch (error) {
+      console.error('获取学习统计失败:', error);
+    }
+  };
+
+  // 每次页面获得焦点时刷新统计
+  useFocusEffect(
+    useCallback(() => {
+      fetchStats();
+    }, [])
+  );
 
   const openEditModal = () => {
     setEditNickname(profile.nickname);
@@ -151,15 +189,15 @@ export default function ProfileScreen() {
           <View style={styles.statsGrid}>
             <View style={styles.statItem}>
               <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>配音次数</ThemedText>
-              <ThemedText style={[styles.statValue, { color: colors.primary }]}>12</ThemedText>
+              <ThemedText style={[styles.statValue, { color: colors.primary }]}>{stats.dubbingCount}</ThemedText>
             </View>
             <View style={styles.statItem}>
               <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>平均分数</ThemedText>
-              <ThemedText style={[styles.statValue, { color: colors.success }]}>85</ThemedText>
+              <ThemedText style={[styles.statValue, { color: colors.success }]}>{stats.averageScore}</ThemedText>
             </View>
             <View style={styles.statItem}>
               <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>学习天数</ThemedText>
-              <ThemedText style={[styles.statValue, { color: colors.secondary }]}>3</ThemedText>
+              <ThemedText style={[styles.statValue, { color: colors.secondary }]}>{stats.learningDays}</ThemedText>
             </View>
           </View>
         </View>
