@@ -6,14 +6,16 @@ import os
 import uuid
 import json
 import secrets
-import hashlib
 from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from database import get_db, Cartoon, Season, Episode, DubbingClip, DubbingRecord
+from database import (
+    get_db, Cartoon, Season, Episode, DubbingClip, DubbingRecord,
+    verify_admin, change_admin_password, AdminUser
+)
 from schemas import (
     CartoonCreate, CartoonUpdate, CartoonResponse, CartoonListResponse,
     SeasonCreate, SeasonUpdate, SeasonResponse, SeasonListResponse,
@@ -24,19 +26,8 @@ from schemas import (
 
 router = APIRouter(prefix="/admin", tags=["后台管理"])
 
-# 配置文件路径
-ADMIN_CONFIG_FILE = os.path.join(os.path.dirname(__file__), "admin_config.json")
-
 # 存储有效的token（简单实现，生产环境建议使用Redis）
 valid_tokens = {}
-
-
-def load_admin_config():
-    """加载管理员配置"""
-    if os.path.exists(ADMIN_CONFIG_FILE):
-        with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"username": "admin", "password": "admin123"}
 
 
 def generate_token():
@@ -46,11 +37,15 @@ def generate_token():
 
 # ===== 登录认证 =====
 @router.post("/login")
-def admin_login(username: str = Form(...), password: str = Form(...)):
+def admin_login(
+    username: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db)
+):
     """管理员登录"""
-    config = load_admin_config()
+    admin = verify_admin(db, username, password)
     
-    if username == config["username"] and password == config["password"]:
+    if admin:
         # 生成token
         token = generate_token()
         # 保存token，有效期24小时
@@ -89,6 +84,42 @@ def verify_token(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="token已过期")
     
     return {"success": True, "username": token_data["username"]}
+
+
+@router.post("/change-password")
+def api_change_password(
+    old_password: str = Form(...),
+    new_password: str = Form(...),
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """修改密码（需要登录）"""
+    # 验证token
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="未登录")
+    
+    token = authorization[7:]
+    if token not in valid_tokens:
+        raise HTTPException(status_code=401, detail="token无效")
+    
+    token_data = valid_tokens[token]
+    if datetime.now() > token_data["expires"]:
+        del valid_tokens[token]
+        raise HTTPException(status_code=401, detail="token已过期")
+    
+    username = token_data["username"]
+    
+    # 验证旧密码
+    admin = verify_admin(db, username, old_password)
+    if not admin:
+        raise HTTPException(status_code=400, detail="原密码错误")
+    
+    # 修改密码
+    if change_admin_password(db, username, new_password):
+        return {"success": True, "message": "密码修改成功"}
+    else:
+        raise HTTPException(status_code=500, detail="密码修改失败")
+
 
 # 文件上传目录
 UPLOAD_DIR = "uploads"

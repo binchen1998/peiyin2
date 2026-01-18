@@ -98,11 +98,70 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 ## 配置
 
+### 数据库配置
+
+支持 SQLite（默认）和 MySQL 数据库。
+
+1. 复制配置文件模板：
+
+```bash
+cp env.example .env
+```
+
+2. 编辑 `.env` 文件：
+
+**SQLite（默认）：**
+```env
+DATABASE_TYPE=sqlite
+DATABASE_URL=sqlite:///./peiyin.db
+```
+
+**MySQL：**
+```env
+DATABASE_TYPE=mysql
+DATABASE_HOST=localhost
+DATABASE_PORT=3306
+DATABASE_NAME=peiyin
+DATABASE_USER=root
+DATABASE_PASSWORD=your_password
+```
+
+或者直接指定完整的数据库URL：
+```env
+DATABASE_URL=mysql+pymysql://user:password@localhost:3306/peiyin?charset=utf8mb4
+```
+
+### 管理员账号
+
+管理员账号密码存储在数据库中。默认账号：
+- 用户名：`admin`
+- 密码：`admin123`
+
+使用脚本修改密码：
+
+```bash
+python change_password.py
+```
+
+该脚本支持：
+- 修改用户名
+- 修改密码
+- 创建新管理员
+- 启用/禁用管理员
+- 删除管理员
+
 ### 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | VOSK_MODEL_PATH | model | Vosk 模型路径 |
+| DATABASE_TYPE | sqlite | 数据库类型 (sqlite/mysql) |
+| DATABASE_URL | sqlite:///./peiyin.db | 数据库连接URL |
+| DATABASE_HOST | localhost | MySQL主机 |
+| DATABASE_PORT | 3306 | MySQL端口 |
+| DATABASE_NAME | peiyin | MySQL数据库名 |
+| DATABASE_USER | root | MySQL用户名 |
+| DATABASE_PASSWORD | | MySQL密码 |
 
 ## 注意事项
 

@@ -1,24 +1,80 @@
 """
 数据库模型和操作
-使用 SQLite + SQLAlchemy
+支持 SQLite 和 MySQL
 """
 
 import os
+import hashlib
 from datetime import datetime
 from typing import List, Optional
+
+# 尝试加载 .env 文件
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from sqlalchemy import create_engine, Column, Integer, String, Float, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, Session
 
-# 数据库配置
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./peiyin.db")
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+def get_database_url():
+    """获取数据库连接URL"""
+    # 如果直接指定了 DATABASE_URL，使用它
+    database_url = os.environ.get("DATABASE_URL")
+    if database_url:
+        return database_url
+    
+    # 根据 DATABASE_TYPE 构建连接URL
+    db_type = os.environ.get("DATABASE_TYPE", "sqlite").lower()
+    
+    if db_type == "mysql":
+        host = os.environ.get("DATABASE_HOST", "localhost")
+        port = os.environ.get("DATABASE_PORT", "3306")
+        name = os.environ.get("DATABASE_NAME", "peiyin")
+        user = os.environ.get("DATABASE_USER", "root")
+        password = os.environ.get("DATABASE_PASSWORD", "")
+        return f"mysql+pymysql://{user}:{password}@{host}:{port}/{name}?charset=utf8mb4"
+    else:
+        # 默认使用 SQLite
+        db_path = os.environ.get("DATABASE_PATH", "./peiyin.db")
+        return f"sqlite:///{db_path}"
+
+
+# 数据库配置
+DATABASE_URL = get_database_url()
+
+# 根据数据库类型设置连接参数
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=3600)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
-# 数据库模型
+def hash_password(password: str) -> str:
+    """对密码进行哈希"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+# ===== 数据库模型 =====
+
+class AdminUser(Base):
+    """管理员用户"""
+    __tablename__ = "admin_users"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(50), unique=True, nullable=False)
+    password_hash = Column(String(64), nullable=False)  # SHA256 hash
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Cartoon(Base):
     """动画片"""
     __tablename__ = "cartoons"
@@ -102,13 +158,13 @@ class DubbingRecord(Base):
     clip = relationship("DubbingClip", back_populates="records")
 
 
-# 创建所有表
+# ===== 数据库操作 =====
+
 def init_db():
     """初始化数据库"""
     Base.metadata.create_all(bind=engine)
 
 
-# 获取数据库会话
 def get_db():
     """获取数据库会话"""
     db = SessionLocal()
@@ -118,9 +174,87 @@ def get_db():
         db.close()
 
 
+def get_db_session():
+    """获取数据库会话（非生成器版本）"""
+    return SessionLocal()
+
+
+def init_admin_user(db: Session):
+    """初始化默认管理员用户"""
+    # 检查是否已有管理员
+    if db.query(AdminUser).count() > 0:
+        return
+    
+    # 创建默认管理员
+    admin = AdminUser(
+        username="admin",
+        password_hash=hash_password("admin123"),
+        is_active=True
+    )
+    db.add(admin)
+    db.commit()
+    print("默认管理员用户已创建: admin / admin123")
+
+
+def verify_admin(db: Session, username: str, password: str) -> Optional[AdminUser]:
+    """验证管理员登录"""
+    password_hash = hash_password(password)
+    return db.query(AdminUser).filter(
+        AdminUser.username == username,
+        AdminUser.password_hash == password_hash,
+        AdminUser.is_active == True
+    ).first()
+
+
+def change_admin_password(db: Session, username: str, new_password: str) -> bool:
+    """修改管理员密码"""
+    admin = db.query(AdminUser).filter(AdminUser.username == username).first()
+    if admin:
+        admin.password_hash = hash_password(new_password)
+        db.commit()
+        return True
+    return False
+
+
+def change_admin_username(db: Session, old_username: str, new_username: str) -> bool:
+    """修改管理员用户名"""
+    # 检查新用户名是否已存在
+    existing = db.query(AdminUser).filter(AdminUser.username == new_username).first()
+    if existing:
+        return False
+    
+    admin = db.query(AdminUser).filter(AdminUser.username == old_username).first()
+    if admin:
+        admin.username = new_username
+        db.commit()
+        return True
+    return False
+
+
+def create_admin_user(db: Session, username: str, password: str) -> Optional[AdminUser]:
+    """创建新管理员用户"""
+    # 检查用户名是否已存在
+    existing = db.query(AdminUser).filter(AdminUser.username == username).first()
+    if existing:
+        return None
+    
+    admin = AdminUser(
+        username=username,
+        password_hash=hash_password(password),
+        is_active=True
+    )
+    db.add(admin)
+    db.commit()
+    db.refresh(admin)
+    return admin
+
+
 # 初始化示例数据
 def init_sample_data(db: Session):
     """初始化示例数据"""
+    # 初始化管理员
+    init_admin_user(db)
+    
     # 检查是否已有数据
     if db.query(Cartoon).count() > 0:
         return

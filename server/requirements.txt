@@ -6,6 +6,10 @@ pydantic==2.5.3
 
 # 数据库
 sqlalchemy==2.0.25
+pymysql==1.1.0  # MySQL support (optional)
+
+# 环境变量
+python-dotenv==1.0.0
 
 # 语音处理
 vosk==0.3.45
