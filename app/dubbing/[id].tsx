@@ -670,16 +670,21 @@ const styles = StyleSheet.create({
   },
   scoreEmoji: {
     fontSize: 48,
+    width: 60,
+    textAlign: 'center',
   },
   scoreInfo: {
     marginLeft: 16,
+    flex: 1,
   },
   scoreLabel: {
     fontSize: 14,
+    marginBottom: 4,
   },
   scoreValue: {
-    fontSize: 48,
+    fontSize: 42,
     fontWeight: 'bold',
+    lineHeight: 50,
   },
   scoreFeedback: {
     fontSize: 18,
