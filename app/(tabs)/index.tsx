@@ -24,12 +24,6 @@ export default function HomeScreen() {
 
   return (
     <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* 顶部标题区域 */}
-      <View style={[styles.header, { backgroundColor: colors.primary }]}>
-        <ThemedText style={styles.headerTitle}>🎬 英语配音乐园</ThemedText>
-        <ThemedText style={styles.headerSubtitle}>选择你喜欢的动画片开始配音吧！</ThemedText>
-      </View>
-
       {/* 动画片列表 */}
       <ScrollView 
         style={styles.scrollView}
@@ -108,29 +102,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    paddingTop: 60,
-    paddingBottom: 24,
-    paddingHorizontal: 20,
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
-  },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 8,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.9)',
-  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 20,
+    paddingTop: 60,
     paddingBottom: 40,
   },
   sectionHeader: {
