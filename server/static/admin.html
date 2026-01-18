@@ -35,6 +35,118 @@
             min-height: 100vh;
         }
 
+        /* 登录页面 */
+        .login-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+        }
+
+        .login-box {
+            background: var(--card);
+            border-radius: 20px;
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .login-header .logo {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .login-header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+
+        .login-header p {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .login-form .form-group {
+            margin-bottom: 20px;
+        }
+
+        .login-form .form-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--text);
+        }
+
+        .login-form .form-input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+
+        .login-form .form-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(255, 107, 53, 0.1);
+        }
+
+        .login-form .btn-login {
+            width: 100%;
+            padding: 16px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .login-form .btn-login:hover {
+            background: var(--primary-dark);
+        }
+
+        .login-form .btn-login:disabled {
+            background: var(--text-secondary);
+            cursor: not-allowed;
+        }
+
+        .login-error {
+            background: #FEE2E2;
+            color: #991B1B;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .login-error.show {
+            display: block;
+        }
+
+        /* 主应用样式 */
+        .app-container {
+            display: none;
+        }
+
+        .app-container.show {
+            display: block;
+        }
+
         /* 顶部导航 */
         .navbar {
             background: var(--primary);
@@ -57,6 +169,12 @@
             gap: 8px;
         }
 
+        .navbar-right {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
         .navbar-stats {
             display: flex;
             gap: 24px;
@@ -72,6 +190,31 @@
         .stat-value {
             font-weight: 600;
             font-size: 18px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .user-info span {
+            font-size: 14px;
+        }
+
+        .btn-logout {
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-logout:hover {
+            background: rgba(255, 255, 255, 0.3);
         }
 
         /* 主布局 */
@@ -648,48 +791,80 @@
     </style>
 </head>
 <body>
-    <!-- 顶部导航 -->
-    <nav class="navbar">
-        <h1>🎬 英语配音乐园 - 后台管理</h1>
-        <div class="navbar-stats" id="navbar-stats">
-            <div class="stat-item">
-                <span>动画片:</span>
-                <span class="stat-value" id="stat-cartoons">0</span>
+    <!-- 登录页面 -->
+    <div class="login-container" id="login-container">
+        <div class="login-box">
+            <div class="login-header">
+                <div class="logo">🎬</div>
+                <h1>英语配音乐园</h1>
+                <p>后台管理系统</p>
             </div>
-            <div class="stat-item">
-                <span>配音片段:</span>
-                <span class="stat-value" id="stat-clips">0</span>
-            </div>
-            <div class="stat-item">
-                <span>配音记录:</span>
-                <span class="stat-value" id="stat-records">0</span>
-            </div>
+            <div class="login-error" id="login-error"></div>
+            <form class="login-form" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label class="form-label">用户名</label>
+                    <input type="text" class="form-input" id="login-username" placeholder="请输入用户名" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">密码</label>
+                    <input type="password" class="form-input" id="login-password" placeholder="请输入密码" required>
+                </div>
+                <button type="submit" class="btn-login" id="btn-login">登录</button>
+            </form>
         </div>
-    </nav>
+    </div>
 
-    <div class="main-container">
-        <!-- 侧边栏 -->
-        <aside class="sidebar">
-            <ul class="sidebar-menu">
-                <li class="active" data-page="dashboard">
-                    <span class="icon">📊</span>
-                    <span>数据概览</span>
-                </li>
-                <li data-page="cartoons">
-                    <span class="icon">🎬</span>
-                    <span>动画片管理</span>
-                </li>
-                <li data-page="records">
-                    <span class="icon">📝</span>
-                    <span>配音记录</span>
-                </li>
-            </ul>
-        </aside>
+    <!-- 主应用 -->
+    <div class="app-container" id="app-container">
+        <!-- 顶部导航 -->
+        <nav class="navbar">
+            <h1>🎬 英语配音乐园 - 后台管理</h1>
+            <div class="navbar-right">
+                <div class="navbar-stats" id="navbar-stats">
+                    <div class="stat-item">
+                        <span>动画片:</span>
+                        <span class="stat-value" id="stat-cartoons">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>配音片段:</span>
+                        <span class="stat-value" id="stat-clips">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>配音记录:</span>
+                        <span class="stat-value" id="stat-records">0</span>
+                    </div>
+                </div>
+                <div class="user-info">
+                    <span>👤 <span id="current-user">admin</span></span>
+                    <button class="btn-logout" onclick="handleLogout()">退出登录</button>
+                </div>
+            </div>
+        </nav>
 
-        <!-- 主内容区 -->
-        <main class="content" id="content">
-            <!-- 内容将通过 JS 动态加载 -->
-        </main>
+        <div class="main-container">
+            <!-- 侧边栏 -->
+            <aside class="sidebar">
+                <ul class="sidebar-menu">
+                    <li class="active" data-page="dashboard">
+                        <span class="icon">📊</span>
+                        <span>数据概览</span>
+                    </li>
+                    <li data-page="cartoons">
+                        <span class="icon">🎬</span>
+                        <span>动画片管理</span>
+                    </li>
+                    <li data-page="records">
+                        <span class="icon">📝</span>
+                        <span>配音记录</span>
+                    </li>
+                </ul>
+            </aside>
+
+            <!-- 主内容区 -->
+            <main class="content" id="content">
+                <!-- 内容将通过 JS 动态加载 -->
+            </main>
+        </div>
     </div>
 
     <!-- 模态框 -->
@@ -719,8 +894,131 @@
         // 当前页面状态
         let currentPage = 'dashboard';
         let allData = { cartoons: [], seasons: [], episodes: [], clips: [] };
+        let authToken = null;
 
-        // 页面切换
+        // ===== 认证相关 =====
+        function getStoredToken() {
+            return localStorage.getItem('admin_token');
+        }
+
+        function setStoredToken(token) {
+            localStorage.setItem('admin_token', token);
+        }
+
+        function clearStoredToken() {
+            localStorage.removeItem('admin_token');
+        }
+
+        function getAuthHeaders() {
+            const token = authToken || getStoredToken();
+            return token ? { 'Authorization': `Bearer ${token}` } : {};
+        }
+
+        async function checkAuth() {
+            const token = getStoredToken();
+            if (!token) {
+                showLoginPage();
+                return false;
+            }
+
+            try {
+                const res = await fetch(`${API_BASE}/admin/verify`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                
+                if (res.ok) {
+                    const data = await res.json();
+                    authToken = token;
+                    document.getElementById('current-user').textContent = data.username;
+                    showAppPage();
+                    return true;
+                } else {
+                    clearStoredToken();
+                    showLoginPage();
+                    return false;
+                }
+            } catch (e) {
+                console.error('验证失败:', e);
+                clearStoredToken();
+                showLoginPage();
+                return false;
+            }
+        }
+
+        function showLoginPage() {
+            document.getElementById('login-container').style.display = 'flex';
+            document.getElementById('app-container').classList.remove('show');
+        }
+
+        function showAppPage() {
+            document.getElementById('login-container').style.display = 'none';
+            document.getElementById('app-container').classList.add('show');
+            loadStats();
+            loadDashboard();
+        }
+
+        async function handleLogin(event) {
+            event.preventDefault();
+            
+            const username = document.getElementById('login-username').value;
+            const password = document.getElementById('login-password').value;
+            const errorEl = document.getElementById('login-error');
+            const btnLogin = document.getElementById('btn-login');
+            
+            btnLogin.disabled = true;
+            btnLogin.textContent = '登录中...';
+            errorEl.classList.remove('show');
+            
+            try {
+                const formData = new FormData();
+                formData.append('username', username);
+                formData.append('password', password);
+                
+                const res = await fetch(`${API_BASE}/admin/login`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok && data.success) {
+                    authToken = data.token;
+                    setStoredToken(data.token);
+                    document.getElementById('current-user').textContent = username;
+                    showAppPage();
+                } else {
+                    errorEl.textContent = data.detail || '登录失败';
+                    errorEl.classList.add('show');
+                }
+            } catch (e) {
+                errorEl.textContent = '网络错误，请稍后重试';
+                errorEl.classList.add('show');
+            } finally {
+                btnLogin.disabled = false;
+                btnLogin.textContent = '登录';
+            }
+        }
+
+        async function handleLogout() {
+            try {
+                await fetch(`${API_BASE}/admin/logout`, {
+                    method: 'POST',
+                    headers: getAuthHeaders()
+                });
+            } catch (e) {
+                // 忽略错误
+            }
+            
+            authToken = null;
+            clearStoredToken();
+            showLoginPage();
+            
+            // 清空表单
+            document.getElementById('login-username').value = '';
+            document.getElementById('login-password').value = '';
+        }
+
+        // ===== 页面切换 =====
         document.querySelectorAll('.sidebar-menu li').forEach(item => {
             item.addEventListener('click', () => {
                 const page = item.dataset.page;
@@ -1585,9 +1883,8 @@
             document.getElementById('modal').classList.remove('active');
         }
 
-        // 初始化
-        loadStats();
-        loadDashboard();
+        // 初始化 - 检查认证状态
+        checkAuth();
     </script>
 </body>
 </html>

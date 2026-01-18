@@ -5,8 +5,11 @@
 import os
 import uuid
 import json
+import secrets
+import hashlib
+from datetime import datetime, timedelta
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -20,6 +23,72 @@ from schemas import (
 )
 
 router = APIRouter(prefix="/admin", tags=["后台管理"])
+
+# 配置文件路径
+ADMIN_CONFIG_FILE = os.path.join(os.path.dirname(__file__), "admin_config.json")
+
+# 存储有效的token（简单实现，生产环境建议使用Redis）
+valid_tokens = {}
+
+
+def load_admin_config():
+    """加载管理员配置"""
+    if os.path.exists(ADMIN_CONFIG_FILE):
+        with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"username": "admin", "password": "admin123"}
+
+
+def generate_token():
+    """生成token"""
+    return secrets.token_hex(32)
+
+
+# ===== 登录认证 =====
+@router.post("/login")
+def admin_login(username: str = Form(...), password: str = Form(...)):
+    """管理员登录"""
+    config = load_admin_config()
+    
+    if username == config["username"] and password == config["password"]:
+        # 生成token
+        token = generate_token()
+        # 保存token，有效期24小时
+        valid_tokens[token] = {
+            "username": username,
+            "expires": datetime.now() + timedelta(hours=24)
+        }
+        return {"success": True, "token": token, "message": "登录成功"}
+    else:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+
+@router.post("/logout")
+def admin_logout(authorization: str = Header(None)):
+    """管理员登出"""
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+        if token in valid_tokens:
+            del valid_tokens[token]
+    return {"success": True, "message": "已登出"}
+
+
+@router.get("/verify")
+def verify_token(authorization: str = Header(None)):
+    """验证token是否有效"""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="未登录")
+    
+    token = authorization[7:]
+    if token not in valid_tokens:
+        raise HTTPException(status_code=401, detail="token无效")
+    
+    token_data = valid_tokens[token]
+    if datetime.now() > token_data["expires"]:
+        del valid_tokens[token]
+        raise HTTPException(status_code=401, detail="token已过期")
+    
+    return {"success": True, "username": token_data["username"]}
 
 # 文件上传目录
 UPLOAD_DIR = "uploads"
