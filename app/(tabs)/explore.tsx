@@ -35,18 +35,16 @@ export default function ProfileScreen() {
           </ThemedText>
           <View style={styles.statsGrid}>
             <View style={styles.statItem}>
-              <ThemedText style={[styles.statValue, { color: colors.primary }]}>12</ThemedText>
               <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>配音次数</ThemedText>
+              <ThemedText style={[styles.statValue, { color: colors.primary }]}>12</ThemedText>
             </View>
-            <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
             <View style={styles.statItem}>
-              <ThemedText style={[styles.statValue, { color: colors.success }]}>85</ThemedText>
               <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>平均分数</ThemedText>
+              <ThemedText style={[styles.statValue, { color: colors.success }]}>85</ThemedText>
             </View>
-            <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
             <View style={styles.statItem}>
-              <ThemedText style={[styles.statValue, { color: colors.secondary }]}>3</ThemedText>
               <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>学习天数</ThemedText>
+              <ThemedText style={[styles.statValue, { color: colors.secondary }]}>3</ThemedText>
             </View>
           </View>
         </View>
@@ -191,23 +189,20 @@ const styles = StyleSheet.create({
   },
   statsGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
   },
   statItem: {
-    alignItems: 'center',
     flex: 1,
-  },
-  statValue: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 4,
+    alignItems: 'center',
+    paddingVertical: 8,
   },
   statLabel: {
     fontSize: 12,
+    marginBottom: 8,
   },
-  statDivider: {
-    width: 1,
-    height: 40,
+  statValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
   },
   achievementCard: {
     borderRadius: 16,
