@@ -1,25 +1,114 @@
-import { StyleSheet, ScrollView, View, Pressable } from 'react-native';
+import { useState } from 'react';
+import { 
+  StyleSheet, 
+  ScrollView, 
+  View, 
+  Pressable, 
+  Modal, 
+  TextInput,
+  Platform,
+  Alert
+} from 'react-native';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useUserProfile } from '@/hooks/use-user-profile';
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
+  const { profile, saveProfile, getAge, isLoading } = useUserProfile();
+  
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editNickname, setEditNickname] = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+
+  const age = getAge();
+
+  const openEditModal = () => {
+    setEditNickname(profile.nickname);
+    if (profile.birthDate) {
+      setSelectedDate(new Date(profile.birthDate));
+    }
+    setShowEditModal(true);
+  };
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('提示', '需要相册权限才能选择头像');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      await saveProfile({ avatarUri: result.assets[0].uri });
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    await saveProfile({
+      nickname: editNickname.trim() || '小小配音家',
+      birthDate: selectedDate.toISOString(),
+    });
+    setShowEditModal(false);
+  };
+
+  const onDateChange = (event: any, date?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+    if (date) {
+      setSelectedDate(date);
+    }
+  };
+
+  const formatDate = (dateString: string | null): string => {
+    if (!dateString) return '未设置';
+    const date = new Date(dateString);
+    return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+  };
 
   return (
     <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* 顶部用户信息 */}
       <View style={[styles.header, { backgroundColor: colors.primary }]}>
         <View style={styles.avatarContainer}>
-          <View style={[styles.avatar, { backgroundColor: 'rgba(255,255,255,0.3)' }]}>
-            <ThemedText style={styles.avatarText}>🧒</ThemedText>
-          </View>
-          <ThemedText style={styles.userName}>小小配音家</ThemedText>
-          <ThemedText style={styles.userLevel}>⭐ 初级学员</ThemedText>
+          <Pressable onPress={pickImage}>
+            <View style={[styles.avatar, { backgroundColor: 'rgba(255,255,255,0.3)' }]}>
+              {profile.avatarUri ? (
+                <Image 
+                  source={{ uri: profile.avatarUri }} 
+                  style={styles.avatarImage}
+                  contentFit="cover"
+                />
+              ) : (
+                <ThemedText style={styles.avatarText}>🧒</ThemedText>
+              )}
+            </View>
+            <View style={styles.editAvatarBadge}>
+              <ThemedText style={styles.editAvatarIcon}>📷</ThemedText>
+            </View>
+          </Pressable>
+          <Pressable onPress={openEditModal}>
+            <ThemedText style={styles.userName}>{profile.nickname}</ThemedText>
+          </Pressable>
+          <ThemedText style={styles.userLevel}>
+            {age !== null ? `${age}岁 · ` : ''}⭐ 初级学员
+          </ThemedText>
         </View>
       </View>
 
@@ -28,6 +117,32 @@ export default function ProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* 个人信息卡片 */}
+        <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={styles.infoHeader}>
+            <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>
+              👤 个人信息
+            </ThemedText>
+            <Pressable onPress={openEditModal}>
+              <ThemedText style={[styles.editButton, { color: colors.primary }]}>编辑</ThemedText>
+            </Pressable>
+          </View>
+          <View style={styles.infoRow}>
+            <ThemedText style={[styles.infoLabel, { color: colors.textSecondary }]}>昵称</ThemedText>
+            <ThemedText style={[styles.infoValue, { color: colors.text }]}>{profile.nickname}</ThemedText>
+          </View>
+          <View style={styles.infoRow}>
+            <ThemedText style={[styles.infoLabel, { color: colors.textSecondary }]}>出生日期</ThemedText>
+            <ThemedText style={[styles.infoValue, { color: colors.text }]}>{formatDate(profile.birthDate)}</ThemedText>
+          </View>
+          <View style={styles.infoRow}>
+            <ThemedText style={[styles.infoLabel, { color: colors.textSecondary }]}>年龄</ThemedText>
+            <ThemedText style={[styles.infoValue, { color: colors.text }]}>
+              {age !== null ? `${age}岁` : '未设置'}
+            </ThemedText>
+          </View>
+        </View>
+
         {/* 学习统计 */}
         <View style={[styles.statsCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>
@@ -108,11 +223,95 @@ export default function ProfileScreen() {
           <ThemedText style={[styles.footerText, { color: colors.textSecondary }]}>
             英语配音乐园 v1.0.0
           </ThemedText>
-          <ThemedText style={[styles.footerSubText, { color: colors.textSecondary }]}>
-            让孩子爱上英语配音 ❤️
-          </ThemedText>
         </View>
       </ScrollView>
+
+      {/* 编辑个人信息模态框 */}
+      <Modal
+        visible={showEditModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowEditModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
+            <View style={styles.modalHeader}>
+              <ThemedText style={[styles.modalTitle, { color: colors.text }]}>编辑个人信息</ThemedText>
+              <Pressable onPress={() => setShowEditModal(false)}>
+                <ThemedText style={styles.modalClose}>✕</ThemedText>
+              </Pressable>
+            </View>
+
+            <View style={styles.modalBody}>
+              <View style={styles.formGroup}>
+                <ThemedText style={[styles.formLabel, { color: colors.text }]}>昵称</ThemedText>
+                <TextInput
+                  style={[styles.formInput, { 
+                    backgroundColor: colors.backgroundSecondary,
+                    color: colors.text,
+                    borderColor: colors.cardBorder
+                  }]}
+                  value={editNickname}
+                  onChangeText={setEditNickname}
+                  placeholder="输入昵称"
+                  placeholderTextColor={colors.textSecondary}
+                  maxLength={20}
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <ThemedText style={[styles.formLabel, { color: colors.text }]}>出生日期</ThemedText>
+                <Pressable 
+                  style={[styles.dateButton, { 
+                    backgroundColor: colors.backgroundSecondary,
+                    borderColor: colors.cardBorder
+                  }]}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <ThemedText style={[styles.dateButtonText, { color: colors.text }]}>
+                    {selectedDate.getFullYear()}年{selectedDate.getMonth() + 1}月{selectedDate.getDate()}日
+                  </ThemedText>
+                </Pressable>
+              </View>
+
+              {showDatePicker && (
+                <DateTimePicker
+                  value={selectedDate}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={onDateChange}
+                  maximumDate={new Date()}
+                  minimumDate={new Date(2010, 0, 1)}
+                />
+              )}
+
+              {Platform.OS === 'ios' && showDatePicker && (
+                <Pressable 
+                  style={[styles.confirmDateButton, { backgroundColor: colors.primary }]}
+                  onPress={() => setShowDatePicker(false)}
+                >
+                  <ThemedText style={styles.confirmDateText}>确定</ThemedText>
+                </Pressable>
+              )}
+            </View>
+
+            <View style={styles.modalFooter}>
+              <Pressable 
+                style={[styles.cancelButton, { borderColor: colors.cardBorder }]}
+                onPress={() => setShowEditModal(false)}
+              >
+                <ThemedText style={[styles.cancelButtonText, { color: colors.text }]}>取消</ThemedText>
+              </Pressable>
+              <Pressable 
+                style={[styles.saveButton, { backgroundColor: colors.primary }]}
+                onPress={handleSaveProfile}
+              >
+                <ThemedText style={styles.saveButtonText}>保存</ThemedText>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ThemedView>
   );
 }
@@ -155,9 +354,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: 80,
+    height: 80,
   },
   avatarText: {
     fontSize: 40,
+  },
+  editAvatarBadge: {
+    position: 'absolute',
+    bottom: 8,
+    right: -4,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editAvatarIcon: {
+    fontSize: 14,
   },
   userName: {
     fontSize: 20,
@@ -175,6 +393,36 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     paddingBottom: 40,
+  },
+  infoCard: {
+    borderRadius: 16,
+    borderWidth: 2,
+    padding: 16,
+    marginBottom: 16,
+  },
+  infoHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  editButton: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
+  },
+  infoLabel: {
+    fontSize: 14,
+  },
+  infoValue: {
+    fontSize: 14,
+    fontWeight: '500',
   },
   statsCard: {
     borderRadius: 16,
@@ -262,9 +510,100 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 12,
-    marginBottom: 4,
   },
-  footerSubText: {
-    fontSize: 11,
+  // 模态框样式
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.1)',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  modalClose: {
+    fontSize: 20,
+    color: '#999',
+  },
+  modalBody: {
+    padding: 20,
+  },
+  formGroup: {
+    marginBottom: 20,
+  },
+  formLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  formInput: {
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    fontSize: 16,
+  },
+  dateButton: {
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+  },
+  dateButtonText: {
+    fontSize: 16,
+  },
+  confirmDateButton: {
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  confirmDateText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    padding: 20,
+    paddingBottom: 40,
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  saveButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
