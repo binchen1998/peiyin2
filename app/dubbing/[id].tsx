@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { StyleSheet, View, Pressable, Dimensions, ActivityIndicator, Platform } from 'react-native';
+import { StyleSheet, View, Pressable, Dimensions, ActivityIndicator, Platform, Modal, ScrollView } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Audio } from 'expo-av';
@@ -36,6 +36,7 @@ export default function DubbingScreen() {
   const [scoringResult, setScoringResult] = useState<ScoringResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPlayingRecording, setIsPlayingRecording] = useState(false);
+  const [showScoreModal, setShowScoreModal] = useState(false);
 
   useEffect(() => {
     // 请求麦克风权限
@@ -237,6 +238,7 @@ export default function DubbingScreen() {
       console.log('overallScore 类型:', typeof result.overallScore, '值:', result.overallScore);
       setScoringResult(result);
       setRecordingStatus('scored');
+      setShowScoreModal(true);
     } catch (err) {
       console.error('提交评分失败:', err);
       // 模拟评分结果（用于演示）
@@ -252,11 +254,15 @@ export default function DubbingScreen() {
       };
       setScoringResult(mockResult);
       setRecordingStatus('scored');
+      setShowScoreModal(true);
     }
   };
 
   const resetRecording = async () => {
     try {
+      // 关闭弹窗
+      setShowScoreModal(false);
+      
       // 停止播放
       if (playbackSoundRef.current) {
         await playbackSoundRef.current.stopAsync();
@@ -277,6 +283,11 @@ export default function DubbingScreen() {
     } catch (err) {
       console.error('重置录音失败:', err);
     }
+  };
+
+  const handleBackFromScore = () => {
+    setShowScoreModal(false);
+    router.back();
   };
 
   return (
@@ -429,63 +440,92 @@ export default function DubbingScreen() {
           </View>
         )}
 
-        {recordingStatus === 'scored' && scoringResult && (
-          <View style={styles.scoreSection}>
-            <View style={[styles.scoreCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-              {/* 总分区域 - 使用独立容器 */}
-              <View style={styles.totalScoreContainer}>
-                <ThemedText style={[styles.totalScoreLabel, { color: colors.textSecondary }]}>
-                  总分
-                </ThemedText>
-                <ThemedText style={[styles.totalScoreNumber, { color: getScoreColor(scoringResult.overallScore ?? 0) }]}>
-                  {Math.round(scoringResult.overallScore ?? 0)}
-                </ThemedText>
-              </View>
-              
-              {/* 反馈文字 */}
-              <View style={styles.feedbackContainer}>
-                <ThemedText style={[styles.scoreFeedback, { color: colors.text }]}>
-                  {getScoreFeedback(scoringResult.overallScore ?? 0)}
-                </ThemedText>
-              </View>
-
-              {/* 单词评分 */}
-              <View style={styles.wordScores}>
-                <ThemedText style={[styles.wordScoresTitle, { color: colors.textSecondary }]}>
-                  单词评分：
-                </ThemedText>
-                <View style={styles.wordScoresList}>
-                  {scoringResult.wordScores.map((wordScore, index) => (
-                    <View key={index} style={[styles.wordScoreItem, { backgroundColor: colors.backgroundSecondary }]}>
-                      <ThemedText style={[styles.wordText, { color: colors.text }]}>
-                        {wordScore.word}
-                      </ThemedText>
-                      <ThemedText style={[styles.wordScoreValue, { color: getScoreColor(wordScore.score) }]}>
-                        {wordScore.score}
-                      </ThemedText>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
-              <View style={styles.scoreActions}>
-                <Pressable 
-                  style={[styles.scoreButton, { backgroundColor: colors.primary }]}
-                  onPress={resetRecording}
-                >
-                  <ThemedText style={styles.scoreButtonText}>再练一次</ThemedText>
-                </Pressable>
-                <Pressable 
-                  style={[styles.scoreButton, styles.nextButton, { backgroundColor: colors.success }]}
-                  onPress={handleBack}
-                >
-                  <ThemedText style={styles.scoreButtonText}>返回列表</ThemedText>
-                </Pressable>
-              </View>
-            </View>
+        {recordingStatus === 'scored' && (
+          <View style={styles.controls}>
+            <ThemedText style={[styles.hint, { color: colors.success }]}>
+              ✅ 评分完成！
+            </ThemedText>
+            <Pressable 
+              style={[styles.viewScoreButton, { backgroundColor: colors.primary }]}
+              onPress={() => setShowScoreModal(true)}
+            >
+              <ThemedText style={styles.viewScoreButtonText}>查看评分结果</ThemedText>
+            </Pressable>
           </View>
         )}
       </View>
+
+      {/* 评分结果弹窗 */}
+      <Modal
+        visible={showScoreModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowScoreModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
+            {scoringResult && (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {/* 关闭按钮 */}
+                <Pressable 
+                  style={styles.modalCloseButton}
+                  onPress={() => setShowScoreModal(false)}
+                >
+                  <IconSymbol name="xmark" size={20} color={colors.textSecondary} />
+                </Pressable>
+
+                {/* 总分区域 */}
+                <View style={styles.modalScoreHeader}>
+                  <ThemedText style={[styles.modalScoreLabel, { color: colors.textSecondary }]}>
+                    总分
+                  </ThemedText>
+                  <ThemedText style={[styles.modalScoreNumber, { color: getScoreColor(scoringResult.overallScore ?? 0) }]}>
+                    {Math.round(scoringResult.overallScore ?? 0)}
+                  </ThemedText>
+                  <ThemedText style={[styles.modalFeedback, { color: colors.text }]}>
+                    {getScoreFeedback(scoringResult.overallScore ?? 0)}
+                  </ThemedText>
+                </View>
+
+                {/* 单词评分 */}
+                <View style={styles.modalWordScores}>
+                  <ThemedText style={[styles.modalWordScoresTitle, { color: colors.textSecondary }]}>
+                    单词评分：
+                  </ThemedText>
+                  <View style={styles.modalWordScoresList}>
+                    {scoringResult.wordScores.map((wordScore, index) => (
+                      <View key={index} style={[styles.modalWordScoreItem, { backgroundColor: colors.backgroundSecondary }]}>
+                        <ThemedText style={[styles.modalWordText, { color: colors.text }]}>
+                          {wordScore.word}
+                        </ThemedText>
+                        <ThemedText style={[styles.modalWordScoreValue, { color: getScoreColor(wordScore.score) }]}>
+                          {wordScore.score}
+                        </ThemedText>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+
+                {/* 操作按钮 */}
+                <View style={styles.modalActions}>
+                  <Pressable 
+                    style={[styles.modalButton, { backgroundColor: colors.primary }]}
+                    onPress={resetRecording}
+                  >
+                    <ThemedText style={styles.modalButtonText}>再练一次</ThemedText>
+                  </Pressable>
+                  <Pressable 
+                    style={[styles.modalButton, { backgroundColor: colors.success }]}
+                    onPress={handleBackFromScore}
+                  >
+                    <ThemedText style={styles.modalButtonText}>返回列表</ThemedText>
+                  </Pressable>
+                </View>
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     </ThemedView>
   );
 }
@@ -655,79 +695,101 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
   },
-  scoreSection: {
-    flex: 1,
+  viewScoreButton: {
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 16,
   },
-  scoreCard: {
-    borderRadius: 20,
-    borderWidth: 2,
+  viewScoreButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
     padding: 20,
   },
-  totalScoreContainer: {
+  modalContent: {
+    width: '100%',
+    maxWidth: 400,
+    maxHeight: '80%',
+    borderRadius: 24,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  modalCloseButton: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    padding: 8,
+    zIndex: 10,
+  },
+  modalScoreHeader: {
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    marginBottom: 10,
+    marginBottom: 24,
+    paddingTop: 8,
   },
-  totalScoreLabel: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  totalScoreNumber: {
-    fontSize: 72,
-    fontWeight: 'bold',
-    lineHeight: 80,
-    includeFontPadding: false,
-    textAlignVertical: 'center',
-  },
-  feedbackContainer: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  scoreFeedback: {
-    fontSize: 20,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  wordScores: {
-    marginBottom: 20,
-  },
-  wordScoresTitle: {
-    fontSize: 14,
+  modalScoreLabel: {
+    fontSize: 16,
     marginBottom: 8,
   },
-  wordScoresList: {
+  modalScoreNumber: {
+    fontSize: 80,
+    fontWeight: 'bold',
+    lineHeight: 88,
+  },
+  modalFeedback: {
+    fontSize: 22,
+    fontWeight: '600',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  modalWordScores: {
+    marginBottom: 24,
+  },
+  modalWordScoresTitle: {
+    fontSize: 14,
+    marginBottom: 12,
+  },
+  modalWordScoresList: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
   },
-  wordScoreItem: {
+  modalWordScoreItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 14,
+    gap: 8,
   },
-  wordText: {
-    fontSize: 14,
+  modalWordText: {
+    fontSize: 15,
   },
-  wordScoreValue: {
-    fontSize: 14,
-    fontWeight: '600',
+  modalWordScoreValue: {
+    fontSize: 15,
+    fontWeight: '700',
   },
-  scoreActions: {
+  modalActions: {
     flexDirection: 'row',
     gap: 12,
   },
-  scoreButton: {
+  modalButton: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
+    paddingVertical: 16,
+    borderRadius: 14,
     alignItems: 'center',
   },
-  nextButton: {},
-  scoreButtonText: {
+  modalButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
