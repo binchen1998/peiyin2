@@ -1,13 +1,15 @@
+import { useState, useEffect } from 'react';
 import { Image } from 'expo-image';
-import { StyleSheet, ScrollView, View, Pressable, Dimensions } from 'react-native';
+import { StyleSheet, ScrollView, View, Pressable, Dimensions, ActivityIndicator } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { getCartoon, getSeasons } from '@/data/mock-data';
+import { fetchCartoon, fetchSeasons } from '@/data/mock-data';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Cartoon, Season } from '@/types';
 
 const { width } = Dimensions.get('window');
 
@@ -17,31 +19,95 @@ export default function CartoonDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  const cartoon = getCartoon(id);
-  const seasons = getSeasons(id);
+  const [cartoon, setCartoon] = useState<Cartoon | null>(null);
+  const [seasons, setSeasons] = useState<Season[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  if (!cartoon) {
-    return (
-      <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
-        <ThemedText>动画片不存在</ThemedText>
-      </ThemedView>
-    );
-  }
+  useEffect(() => {
+    loadData();
+  }, [id]);
+
+  const loadData = async () => {
+    if (!id) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const [cartoonData, seasonsData] = await Promise.all([
+        fetchCartoon(id),
+        fetchSeasons(id)
+      ]);
+      
+      setCartoon(cartoonData);
+      setSeasons(seasonsData);
+    } catch (err) {
+      console.error('加载数据失败:', err);
+      setError('加载失败，请重试');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSeasonPress = (seasonId: string) => {
-    router.push(`/season/${seasonId}?cartoonName=${encodeURIComponent(cartoon.nameCN)}`);
+    if (cartoon) {
+      router.push(`/season/${seasonId}?cartoonName=${encodeURIComponent(cartoon.nameCN)}`);
+    }
   };
 
   const handleBack = () => {
     router.back();
   };
 
+  // 加载中状态
+  if (loading) {
+    return (
+      <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <ThemedText style={[styles.loadingText, { color: colors.textSecondary }]}>
+            加载中...
+          </ThemedText>
+        </View>
+      </ThemedView>
+    );
+  }
+
+  // 错误或不存在状态
+  if (error || !cartoon) {
+    return (
+      <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.headerPlaceholder}>
+          <Pressable 
+            style={[styles.backButton, { backgroundColor: colors.card }]}
+            onPress={handleBack}
+          >
+            <IconSymbol name="chevron.left" size={24} color={colors.primary} />
+          </Pressable>
+        </View>
+        <View style={styles.errorContainer}>
+          <ThemedText style={styles.errorEmoji}>😥</ThemedText>
+          <ThemedText style={[styles.errorText, { color: colors.textSecondary }]}>
+            {error || '动画片不存在'}
+          </ThemedText>
+          <Pressable 
+            style={[styles.retryButton, { backgroundColor: colors.primary }]}
+            onPress={loadData}
+          >
+            <ThemedText style={styles.retryButtonText}>重试</ThemedText>
+          </Pressable>
+        </View>
+      </ThemedView>
+    );
+  }
+
   return (
     <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* 顶部图片和返回按钮 */}
       <View style={styles.headerContainer}>
         <Image
-          source={{ uri: cartoon.thumbnail }}
+          source={{ uri: cartoon.thumbnail || 'https://picsum.photos/seed/default/300/200' }}
           style={styles.headerImage}
           contentFit="cover"
         />
@@ -105,15 +171,26 @@ export default function CartoonDetailScreen() {
           ))}
         </View>
 
+        {seasons.length === 0 && (
+          <View style={styles.emptyState}>
+            <ThemedText style={styles.emptyEmoji}>📺</ThemedText>
+            <ThemedText style={[styles.emptyText, { color: colors.textSecondary }]}>
+              暂无可用的季数
+            </ThemedText>
+          </View>
+        )}
+
         {/* 动画片简介 */}
-        <View style={[styles.descCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <ThemedText style={[styles.descTitle, { color: colors.text }]}>
-            📖 简介
-          </ThemedText>
-          <ThemedText style={[styles.descText, { color: colors.textSecondary }]}>
-            {cartoon.description}
-          </ThemedText>
-        </View>
+        {cartoon.description && (
+          <View style={[styles.descCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <ThemedText style={[styles.descTitle, { color: colors.text }]}>
+              📖 简介
+            </ThemedText>
+            <ThemedText style={[styles.descText, { color: colors.textSecondary }]}>
+              {cartoon.description}
+            </ThemedText>
+          </View>
+        )}
       </ScrollView>
     </ThemedView>
   );
@@ -127,6 +204,45 @@ const getSeasonColor = (index: number): string => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+  },
+  headerPlaceholder: {
+    height: 100,
+    paddingTop: 50,
+    paddingHorizontal: 16,
+  },
+  errorContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  errorEmoji: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  errorText: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  retryButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 20,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   headerContainer: {
     position: 'relative',
@@ -225,6 +341,17 @@ const styles = StyleSheet.create({
   },
   seasonArrow: {
     padding: 8,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyEmoji: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  emptyText: {
+    fontSize: 16,
   },
   descCard: {
     marginTop: 24,

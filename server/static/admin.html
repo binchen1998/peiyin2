@@ -893,7 +893,7 @@
 
         // 当前页面状态
         let currentPage = 'dashboard';
-        let allData = { cartoons: [], seasons: [], episodes: [], clips: [] };
+        let allData = { cartoons: [], seasons: [] };
         let authToken = null;
 
         // ===== 认证相关 =====
@@ -1068,13 +1068,11 @@
 
         // 加载所有数据
         async function loadAllData() {
-            const [cartoons, seasons, episodes, clips] = await Promise.all([
+            const [cartoons, seasons] = await Promise.all([
                 fetch(`${API_BASE}/admin/cartoons`).then(r => r.json()),
-                fetch(`${API_BASE}/admin/seasons`).then(r => r.json()),
-                fetch(`${API_BASE}/admin/episodes`).then(r => r.json()),
-                fetch(`${API_BASE}/admin/clips`).then(r => r.json())
+                fetch(`${API_BASE}/admin/seasons`).then(r => r.json())
             ]);
-            allData = { cartoons, seasons, episodes, clips };
+            allData = { cartoons, seasons };
             return allData;
         }
 
@@ -1146,7 +1144,7 @@
                                 ${stats.recent_records.map(r => `
                                     <tr>
                                         <td>${r.id}</td>
-                                        <td>${r.clip_id}</td>
+                                        <td>${r.clip_path || '-'}</td>
                                         <td><span class="badge ${r.score >= 70 ? 'badge-success' : 'badge-warning'}">${r.score || '-'}</span></td>
                                         <td>${r.feedback || '-'}</td>
                                         <td>${new Date(r.created_at).toLocaleString()}</td>
@@ -1162,7 +1160,7 @@
         // 动画片树形管理
         async function loadCartoonsTree() {
             await loadAllData();
-            const { cartoons, seasons, episodes, clips } = allData;
+            const { cartoons, seasons } = allData;
 
             const content = document.getElementById('content');
             content.innerHTML = `
@@ -1173,6 +1171,13 @@
                         <button class="btn btn-outline" onclick="importData()">📥 导入JSON</button>
                         <button class="btn btn-primary" onclick="showCartoonForm()">➕ 新增动画片</button>
                     </div>
+                </div>
+                
+                <div class="card" style="margin-bottom: 20px; background: #FEF3C7; border-color: #F59E0B;">
+                    <p style="margin: 0; color: #92400E;">
+                        💡 <strong>提示：</strong>集和配音片段信息从 all.json 动态获取，不需要在后台手动添加。
+                        只需为每季配置正确的 <code>all.json URL</code> 即可。
+                    </p>
                 </div>
 
                 <div class="tree-container">
@@ -1196,60 +1201,22 @@
                                 </div>
                                 <div class="tree-children">
                                     ${cartoonSeasons.map(season => {
-                                        const seasonEpisodes = episodes.filter(e => e.season_id === season.id).sort((a, b) => a.number - b.number);
                                         return `
                                             <div class="tree-child" data-id="${season.id}">
-                                                <div class="tree-header" onclick="toggleTree(this)">
-                                                    <div class="tree-toggle ${seasonEpisodes.length > 0 ? '' : 'hidden'}">▶</div>
+                                                <div class="tree-header">
                                                     <span class="tree-icon">📺</span>
                                                     <div class="tree-info">
                                                         <div class="tree-title">第 ${season.number} 季</div>
-                                                        <div class="tree-subtitle">${seasonEpisodes.length}集 · <span class="badge ${season.is_active ? 'badge-success' : 'badge-danger'}">${season.is_active ? '启用' : '禁用'}</span></div>
+                                                        <div class="tree-subtitle">
+                                                            ${season.all_json_url ? '✅ 已配置 JSON URL' : '⚠️ 未配置 JSON URL'}
+                                                            · <span class="badge ${season.is_active ? 'badge-success' : 'badge-danger'}">${season.is_active ? '启用' : '禁用'}</span>
+                                                        </div>
+                                                        ${season.all_json_url ? `<div class="tree-subtitle" style="font-size: 11px; word-break: break-all; max-width: 400px;">${season.all_json_url}</div>` : ''}
                                                     </div>
                                                     <div class="tree-actions" onclick="event.stopPropagation()">
-                                                        <button class="btn btn-outline btn-sm" onclick="showEpisodeForm('${season.id}')">➕ 集</button>
                                                         <button class="btn btn-outline btn-sm" onclick="showSeasonFormEdit('${season.id}')">编辑</button>
                                                         <button class="btn btn-danger btn-sm" onclick="deleteSeason('${season.id}')">删除</button>
                                                     </div>
-                                                </div>
-                                                <div class="tree-grandchildren">
-                                                    ${seasonEpisodes.map(episode => {
-                                                        const episodeClips = clips.filter(c => c.episode_id === episode.id).sort((a, b) => a.order - b.order);
-                                                        return `
-                                                            <div class="tree-grandchild" data-id="${episode.id}">
-                                                                <div class="tree-header" onclick="toggleTree(this)">
-                                                                    <div class="tree-toggle ${episodeClips.length > 0 ? '' : 'hidden'}">▶</div>
-                                                                    <img class="thumbnail" src="${episode.thumbnail || 'https://via.placeholder.com/60x40'}" alt="">
-                                                                    <div class="tree-info">
-                                                                        <div class="tree-title">第 ${episode.number} 集 ${episode.title_cn ? '- ' + episode.title_cn : ''}</div>
-                                                                        <div class="tree-subtitle">${episode.title || ''} · ${episodeClips.length}个片段 · <span class="badge ${episode.is_active ? 'badge-success' : 'badge-danger'}">${episode.is_active ? '启用' : '禁用'}</span></div>
-                                                                    </div>
-                                                                    <div class="tree-actions" onclick="event.stopPropagation()">
-                                                                        <button class="btn btn-outline btn-sm" onclick="showClipForm('${episode.id}')">➕ 片段</button>
-                                                                        <button class="btn btn-outline btn-sm" onclick="showEpisodeFormEdit('${episode.id}')">编辑</button>
-                                                                        <button class="btn btn-danger btn-sm" onclick="deleteEpisode('${episode.id}')">删除</button>
-                                                                    </div>
-                                                                </div>
-                                                                <div class="tree-clips">
-                                                                    ${episodeClips.length === 0 ? '<div style="padding: 12px; color: var(--text-secondary); text-align: center;">暂无配音片段</div>' : ''}
-                                                                    ${episodeClips.map(clip => `
-                                                                        <div class="clip-item">
-                                                                            <div class="clip-order">${clip.order}</div>
-                                                                            <div class="clip-info">
-                                                                                <div class="clip-text">"${clip.original_text}"</div>
-                                                                                <div class="clip-translation">${clip.translation_cn || ''}</div>
-                                                                                <div class="clip-meta">${clip.character || '未知角色'} · ${(clip.end_time - clip.start_time).toFixed(1)}秒</div>
-                                                                            </div>
-                                                                            <div class="tree-actions">
-                                                                                <button class="btn btn-outline btn-sm" onclick="showClipFormEdit('${clip.id}')">编辑</button>
-                                                                                <button class="btn btn-danger btn-sm" onclick="deleteClip('${clip.id}')">删除</button>
-                                                                            </div>
-                                                                        </div>
-                                                                    `).join('')}
-                                                                </div>
-                                                            </div>
-                                                        `;
-                                                    }).join('')}
                                                 </div>
                                             </div>
                                         `;
@@ -1438,6 +1405,13 @@
                     <input type="number" class="form-input" id="form-number" value="1" min="1">
                 </div>
                 <div class="form-group">
+                    <label class="form-label">all.json URL</label>
+                    <input type="text" class="form-input" id="form-all-json-url" placeholder="如: https://example.com/videos/peppa/s1/all.json">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                        all.json 包含该季所有集的信息，格式: [{"id": 0, "name": "目录名称"}, ...]
+                    </p>
+                </div>
+                <div class="form-group">
                     <label class="form-label">
                         <input type="checkbox" id="form-active" checked> 启用
                     </label>
@@ -1464,6 +1438,13 @@
                     <input type="number" class="form-input" id="form-number" value="${season.number}" min="1">
                 </div>
                 <div class="form-group">
+                    <label class="form-label">all.json URL</label>
+                    <input type="text" class="form-input" id="form-all-json-url" value="${season.all_json_url || ''}" placeholder="如: https://example.com/videos/peppa/s1/all.json">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                        all.json 包含该季所有集的信息，格式: [{"id": 0, "name": "目录名称"}, ...]
+                    </p>
+                </div>
+                <div class="form-group">
                     <label class="form-label">
                         <input type="checkbox" id="form-active" ${season.is_active ? 'checked' : ''}> 启用
                     </label>
@@ -1480,6 +1461,7 @@
                 id: document.getElementById('form-id').value,
                 cartoon_id: document.getElementById('form-cartoon-id').value,
                 number: parseInt(document.getElementById('form-number').value),
+                all_json_url: document.getElementById('form-all-json-url').value || null,
                 is_active: document.getElementById('form-active').checked
             };
 
@@ -1829,7 +1811,7 @@
                             <thead>
                                 <tr>
                                     <th>ID</th>
-                                    <th>片段ID</th>
+                                    <th>片段路径</th>
                                     <th>用户ID</th>
                                     <th>得分</th>
                                     <th>反馈</th>
@@ -1842,7 +1824,7 @@
                                 ${records.map(r => `
                                     <tr>
                                         <td>${r.id}</td>
-                                        <td>${r.clip_id}</td>
+                                        <td style="max-width: 200px; word-break: break-all; font-size: 12px;">${r.clip_path || '-'}</td>
                                         <td>${r.user_id || '-'}</td>
                                         <td><span class="badge ${r.score >= 70 ? 'badge-success' : 'badge-warning'}">${r.score || '-'}</span></td>
                                         <td>${r.feedback || '-'}</td>

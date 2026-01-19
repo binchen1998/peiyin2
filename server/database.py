@@ -75,6 +75,17 @@ class AdminUser(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class AdminToken(Base):
+    """管理员登录Token（持久化存储，服务重启后仍有效）"""
+    __tablename__ = "admin_tokens"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    token = Column(String(64), unique=True, nullable=False, index=True)
+    username = Column(String(50), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Cartoon(Base):
     """动画片"""
     __tablename__ = "cartoons"
@@ -98,48 +109,11 @@ class Season(Base):
     id = Column(String(50), primary_key=True)
     cartoon_id = Column(String(50), ForeignKey("cartoons.id"), nullable=False)
     number = Column(Integer, nullable=False)  # 第几季
+    all_json_url = Column(String(500))  # all.json 的 URL，用于获取所有集的信息
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     cartoon = relationship("Cartoon", back_populates="seasons")
-    episodes = relationship("Episode", back_populates="season", cascade="all, delete-orphan")
-
-
-class Episode(Base):
-    """集"""
-    __tablename__ = "episodes"
-    
-    id = Column(String(50), primary_key=True)
-    season_id = Column(String(50), ForeignKey("seasons.id"), nullable=False)
-    number = Column(Integer, nullable=False)  # 第几集
-    title = Column(String(200))  # 英文标题
-    title_cn = Column(String(200))  # 中文标题
-    thumbnail = Column(String(500))  # 缩略图URL
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    season = relationship("Season", back_populates="episodes")
-    clips = relationship("DubbingClip", back_populates="episode", cascade="all, delete-orphan")
-
-
-class DubbingClip(Base):
-    """配音片段"""
-    __tablename__ = "dubbing_clips"
-    
-    id = Column(String(50), primary_key=True)
-    episode_id = Column(String(50), ForeignKey("episodes.id"), nullable=False)
-    order = Column(Integer, nullable=False)  # 顺序
-    video_url = Column(String(500))  # 视频URL
-    original_text = Column(Text, nullable=False)  # 原文
-    translation_cn = Column(Text)  # 中文翻译
-    start_time = Column(Float, default=0)  # 开始时间(秒)
-    end_time = Column(Float, default=0)  # 结束时间(秒)
-    character = Column(String(100))  # 角色名
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    episode = relationship("Episode", back_populates="clips")
-    records = relationship("DubbingRecord", back_populates="clip", cascade="all, delete-orphan")
 
 
 class DubbingRecord(Base):
@@ -147,22 +121,101 @@ class DubbingRecord(Base):
     __tablename__ = "dubbing_records"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    clip_id = Column(String(50), ForeignKey("dubbing_clips.id"), nullable=False)
+    clip_path = Column(String(500), nullable=False)  # clip 的完整路径，如 "CE001/clips/clip_1.mp4"
+    season_id = Column(String(50))  # 季ID，用于跳转回配音页面
     user_id = Column(String(50))  # 用户ID（可选）
     audio_url = Column(String(500))  # 录音URL
     score = Column(Integer)  # 总分
     feedback = Column(Text)  # 反馈
     word_scores = Column(Text)  # 单词评分JSON
     created_at = Column(DateTime, default=datetime.utcnow)
-    
-    clip = relationship("DubbingClip", back_populates="records")
 
 
 # ===== 数据库操作 =====
 
+def migrate_db():
+    """数据库迁移 - 添加缺失的列并处理表结构变更"""
+    from sqlalchemy import inspect, text
+    
+    inspector = inspect(engine)
+    
+    # 检查 seasons 表是否存在
+    if 'seasons' in inspector.get_table_names():
+        columns = [col['name'] for col in inspector.get_columns('seasons')]
+        
+        # 添加 all_json_url 列（如果不存在）
+        if 'all_json_url' not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE seasons ADD COLUMN all_json_url VARCHAR(500)"))
+                conn.commit()
+                print("数据库迁移: 已添加 seasons.all_json_url 列")
+    
+    # 检查 dubbing_records 表是否存在
+    if 'dubbing_records' in inspector.get_table_names():
+        columns = [col['name'] for col in inspector.get_columns('dubbing_records')]
+        
+        # 检查是否需要重建表（如果有 clip_id 列且是 NOT NULL）
+        if 'clip_id' in columns:
+            print("数据库迁移: 检测到旧的 clip_id 列，需要重建 dubbing_records 表")
+            with engine.connect() as conn:
+                # SQLite 不支持删除列，需要重建表
+                # 1. 创建新表
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS dubbing_records_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        clip_path VARCHAR(500) NOT NULL,
+                        user_id VARCHAR(50),
+                        audio_url VARCHAR(500),
+                        score INTEGER,
+                        feedback TEXT,
+                        word_scores TEXT,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
+                
+                # 2. 迁移数据（使用 clip_id 或 clip_path）
+                if 'clip_path' in columns:
+                    conn.execute(text("""
+                        INSERT INTO dubbing_records_new (id, clip_path, user_id, audio_url, score, feedback, word_scores, created_at)
+                        SELECT id, COALESCE(clip_path, clip_id), user_id, audio_url, score, feedback, word_scores, created_at
+                        FROM dubbing_records
+                    """))
+                else:
+                    conn.execute(text("""
+                        INSERT INTO dubbing_records_new (id, clip_path, user_id, audio_url, score, feedback, word_scores, created_at)
+                        SELECT id, clip_id, user_id, audio_url, score, feedback, word_scores, created_at
+                        FROM dubbing_records
+                    """))
+                
+                # 3. 删除旧表
+                conn.execute(text("DROP TABLE dubbing_records"))
+                
+                # 4. 重命名新表
+                conn.execute(text("ALTER TABLE dubbing_records_new RENAME TO dubbing_records"))
+                
+                conn.commit()
+                print("数据库迁移: 已重建 dubbing_records 表，移除了 clip_id 列")
+        
+        # 如果没有 clip_id 但也没有 clip_path，添加 clip_path
+        elif 'clip_path' not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE dubbing_records ADD COLUMN clip_path VARCHAR(500)"))
+                conn.commit()
+                print("数据库迁移: 已添加 dubbing_records.clip_path 列")
+        
+        # 添加 season_id 列（如果不存在）
+        if 'season_id' not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE dubbing_records ADD COLUMN season_id VARCHAR(50)"))
+                conn.commit()
+                print("数据库迁移: 已添加 dubbing_records.season_id 列")
+
+
 def init_db():
     """初始化数据库"""
     Base.metadata.create_all(bind=engine)
+    # 执行数据库迁移
+    migrate_db()
 
 
 def get_db():
@@ -249,6 +302,37 @@ def create_admin_user(db: Session, username: str, password: str) -> Optional[Adm
     return admin
 
 
+# ===== Token 管理 =====
+def create_token(db: Session, token: str, username: str, expires_at: datetime) -> AdminToken:
+    """创建新的登录 token"""
+    admin_token = AdminToken(
+        token=token,
+        username=username,
+        expires_at=expires_at
+    )
+    db.add(admin_token)
+    db.commit()
+    return admin_token
+
+
+def get_token(db: Session, token: str) -> Optional[AdminToken]:
+    """获取 token 信息"""
+    return db.query(AdminToken).filter(AdminToken.token == token).first()
+
+
+def delete_token(db: Session, token: str) -> bool:
+    """删除 token"""
+    result = db.query(AdminToken).filter(AdminToken.token == token).delete()
+    db.commit()
+    return result > 0
+
+
+def cleanup_expired_tokens(db: Session):
+    """清理过期的 token"""
+    db.query(AdminToken).filter(AdminToken.expires_at < datetime.utcnow()).delete()
+    db.commit()
+
+
 # 初始化示例数据
 def init_sample_data(db: Session):
     """初始化示例数据"""
@@ -290,97 +374,17 @@ def init_sample_data(db: Session):
     
     db.commit()
     
-    # 创建季节
+    # 创建季节（包含 all_json_url）
     seasons_data = [
-        {"id": "peppa-s1", "cartoon_id": "peppa-pig", "number": 1},
-        {"id": "peppa-s2", "cartoon_id": "peppa-pig", "number": 2},
-        {"id": "paw-s1", "cartoon_id": "paw-patrol", "number": 1},
-        {"id": "frozen-s1", "cartoon_id": "frozen", "number": 1},
+        {"id": "peppa-s1", "cartoon_id": "peppa-pig", "number": 1, "all_json_url": "https://example.com/peppa-pig/s1/all.json"},
+        {"id": "peppa-s2", "cartoon_id": "peppa-pig", "number": 2, "all_json_url": "https://example.com/peppa-pig/s2/all.json"},
+        {"id": "paw-s1", "cartoon_id": "paw-patrol", "number": 1, "all_json_url": "https://example.com/paw-patrol/s1/all.json"},
+        {"id": "frozen-s1", "cartoon_id": "frozen", "number": 1, "all_json_url": "https://example.com/frozen/s1/all.json"},
     ]
     
     for data in seasons_data:
         season = Season(**data)
         db.add(season)
-    
-    db.commit()
-    
-    # 创建集数
-    episodes_data = [
-        {"id": "peppa-s1-e1", "season_id": "peppa-s1", "number": 1, "title": "Muddy Puddles", "title_cn": "泥坑", "thumbnail": "https://picsum.photos/seed/peppa1/300/200"},
-        {"id": "peppa-s1-e2", "season_id": "peppa-s1", "number": 2, "title": "Mr Dinosaur is Lost", "title_cn": "恐龙先生不见了", "thumbnail": "https://picsum.photos/seed/peppa2/300/200"},
-        {"id": "peppa-s1-e3", "season_id": "peppa-s1", "number": 3, "title": "Best Friend", "title_cn": "最好的朋友", "thumbnail": "https://picsum.photos/seed/peppa3/300/200"},
-        {"id": "paw-s1-e1", "season_id": "paw-s1", "number": 1, "title": "Pups Make a Splash", "title_cn": "狗狗们溅起水花", "thumbnail": "https://picsum.photos/seed/paw1/300/200"},
-        {"id": "frozen-s1-e1", "season_id": "frozen-s1", "number": 1, "title": "Let It Go", "title_cn": "随它吧", "thumbnail": "https://picsum.photos/seed/frozen1/300/200"},
-    ]
-    
-    for data in episodes_data:
-        episode = Episode(**data)
-        db.add(episode)
-    
-    db.commit()
-    
-    # 创建配音片段
-    clips_data = [
-        {
-            "id": "clip-1",
-            "episode_id": "peppa-s1-e1",
-            "order": 1,
-            "video_url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-            "original_text": "I am Peppa Pig.",
-            "translation_cn": "我是小猪佩奇。",
-            "start_time": 0,
-            "end_time": 3,
-            "character": "Peppa"
-        },
-        {
-            "id": "clip-2",
-            "episode_id": "peppa-s1-e1",
-            "order": 2,
-            "video_url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-            "original_text": "This is my little brother George.",
-            "translation_cn": "这是我的弟弟乔治。",
-            "start_time": 3,
-            "end_time": 6,
-            "character": "Peppa"
-        },
-        {
-            "id": "clip-3",
-            "episode_id": "peppa-s1-e1",
-            "order": 3,
-            "video_url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-            "original_text": "I love jumping in muddy puddles!",
-            "translation_cn": "我喜欢在泥坑里跳！",
-            "start_time": 6,
-            "end_time": 10,
-            "character": "Peppa"
-        },
-        {
-            "id": "clip-4",
-            "episode_id": "paw-s1-e1",
-            "order": 1,
-            "video_url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-            "original_text": "No job is too big, no pup is too small!",
-            "translation_cn": "没有什么任务太大，没有什么狗狗太小！",
-            "start_time": 0,
-            "end_time": 4,
-            "character": "Ryder"
-        },
-        {
-            "id": "clip-5",
-            "episode_id": "frozen-s1-e1",
-            "order": 1,
-            "video_url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-            "original_text": "Let it go, let it go!",
-            "translation_cn": "随它吧，随它吧！",
-            "start_time": 0,
-            "end_time": 4,
-            "character": "Elsa"
-        },
-    ]
-    
-    for data in clips_data:
-        clip = DubbingClip(**data)
-        db.add(clip)
     
     db.commit()
     print("示例数据初始化完成")

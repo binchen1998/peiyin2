@@ -4,38 +4,35 @@ export interface Cartoon {
   id: string;
   name: string;
   nameCN: string;
-  thumbnail: string;
-  description: string;
-  seasons: Season[];
+  thumbnail: string | null;
+  description: string | null;
 }
 
 export interface Season {
   id: string;
   number: number;
   cartoonId: string;
-  episodes: Episode[];
+  allJsonUrl: string | null;  // all.json 的 URL
 }
 
+// 从 all.json 获取的集信息
 export interface Episode {
-  id: string;
-  number: number;
-  title: string;
-  titleCN: string;
-  thumbnail: string;
+  id: number;  // 在 all.json 中的序号
+  name: string;  // 目录名称
   seasonId: string;
-  dubbingClips: DubbingClip[];
+  title: string | null;
+  titleCN: string | null;
+  thumbnail: string | null;
 }
 
+// 从单集 JSON 获取的配音片段
 export interface DubbingClip {
-  id: string;
-  episodeId: string;
-  order: number;
+  clipPath: string;  // 完整路径，如 "CE001 Muddy Puddles/clips/clip_1.mp4"
   videoUrl: string;
   originalText: string;
-  translationCN: string;
-  startTime: number;
-  endTime: number;
-  character: string;
+  translationCN: string | null;
+  thumbnail: string | null;
+  duration: number;
 }
 
 // 评分结果
@@ -62,10 +59,17 @@ export interface WordScore {
 // 用户配音记录
 export interface DubbingRecord {
   id: string;
-  clipId: string;
+  clipPath: string;
   userId: string;
   audioUrl: string;
   score: number;
   scoringResult: ScoringResult;
   createdAt: string;
+}
+
+// 用户学习统计
+export interface UserLearningStats {
+  dubbingCount: number;
+  averageScore: number;
+  learningDays: number;
 }

@@ -3,13 +3,15 @@ App 前端 API 路由
 提供给 React Native App 使用的接口
 """
 
+import httpx
 from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
+from urllib.parse import urljoin
 
-from database import get_db, Cartoon, Season, Episode, DubbingClip, DubbingRecord
+from database import get_db, Cartoon, Season, DubbingRecord
 from schemas import (
     AppCartoonResponse, AppSeasonResponse, 
     AppEpisodeResponse, AppDubbingClipResponse,
@@ -17,6 +19,25 @@ from schemas import (
 )
 
 router = APIRouter(prefix="/api/app", tags=["App接口"])
+
+
+async def fetch_json(url: str) -> dict:
+    """从 URL 获取 JSON 数据"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"无法获取远程数据: {str(e)}")
+
+
+def get_base_url(all_json_url: str) -> str:
+    """从 all.json URL 获取基础 URL"""
+    # 例如: https://example.com/peppa/s1/all.json -> https://example.com/peppa/s1/
+    if all_json_url.endswith('/all.json'):
+        return all_json_url[:-8]  # 移除 'all.json'
+    return all_json_url.rsplit('/', 1)[0] + '/'
 
 
 @router.get("/cartoons", response_model=List[AppCartoonResponse])
@@ -67,79 +88,151 @@ def get_seasons(cartoon_id: str, db: Session = Depends(get_db)):
         AppSeasonResponse(
             id=s.id,
             number=s.number,
-            cartoonId=s.cartoon_id
+            cartoonId=s.cartoon_id,
+            allJsonUrl=s.all_json_url
         )
         for s in seasons
     ]
 
 
 @router.get("/seasons/{season_id}/episodes", response_model=List[AppEpisodeResponse])
-def get_episodes(season_id: str, db: Session = Depends(get_db)):
-    """获取集列表"""
-    episodes = db.query(Episode).filter(
-        Episode.season_id == season_id,
-        Episode.is_active == True
-    ).order_by(Episode.number).all()
-    
-    return [
-        AppEpisodeResponse(
-            id=e.id,
-            number=e.number,
-            title=e.title,
-            titleCN=e.title_cn,
-            thumbnail=e.thumbnail,
-            seasonId=e.season_id
-        )
-        for e in episodes
-    ]
-
-
-@router.get("/episodes/{episode_id}/clips", response_model=List[AppDubbingClipResponse])
-def get_clips(episode_id: str, db: Session = Depends(get_db)):
-    """获取配音片段列表"""
-    clips = db.query(DubbingClip).filter(
-        DubbingClip.episode_id == episode_id,
-        DubbingClip.is_active == True
-    ).order_by(DubbingClip.order).all()
-    
-    return [
-        AppDubbingClipResponse(
-            id=c.id,
-            episodeId=c.episode_id,
-            order=c.order,
-            videoUrl=c.video_url,
-            originalText=c.original_text,
-            translationCN=c.translation_cn,
-            startTime=c.start_time,
-            endTime=c.end_time,
-            character=c.character
-        )
-        for c in clips
-    ]
-
-
-@router.get("/clips/{clip_id}", response_model=AppDubbingClipResponse)
-def get_clip(clip_id: str, db: Session = Depends(get_db)):
-    """获取配音片段详情"""
-    clip = db.query(DubbingClip).filter(
-        DubbingClip.id == clip_id,
-        DubbingClip.is_active == True
+async def get_episodes(season_id: str, db: Session = Depends(get_db)):
+    """
+    获取集列表
+    从季的 all_json_url 动态获取
+    """
+    season = db.query(Season).filter(
+        Season.id == season_id,
+        Season.is_active == True
     ).first()
     
-    if not clip:
-        raise HTTPException(status_code=404, detail="配音片段不存在")
+    if not season:
+        raise HTTPException(status_code=404, detail="季不存在")
     
-    return AppDubbingClipResponse(
-        id=clip.id,
-        episodeId=clip.episode_id,
-        order=clip.order,
-        videoUrl=clip.video_url,
-        originalText=clip.original_text,
-        translationCN=clip.translation_cn,
-        startTime=clip.start_time,
-        endTime=clip.end_time,
-        character=clip.character
-    )
+    if not season.all_json_url:
+        raise HTTPException(status_code=404, detail="该季未配置 all.json URL")
+    
+    # 获取 all.json
+    all_data = await fetch_json(season.all_json_url)
+    
+    # all.json 格式: [{"id": 0, "name": "CE001 Muddy Puddles"}, ...]
+    episodes = []
+    for item in all_data:
+        episodes.append(AppEpisodeResponse(
+            id=item["id"],
+            name=item["name"],
+            seasonId=season_id,
+            title=item["name"],  # 默认使用 name 作为标题
+            titleCN=None,
+            thumbnail=None
+        ))
+    
+    return episodes
+
+
+@router.get("/seasons/{season_id}/episodes/{episode_name}", response_model=AppEpisodeResponse)
+async def get_episode_detail(season_id: str, episode_name: str, db: Session = Depends(get_db)):
+    """
+    获取单集详情
+    从单集的 JSON 文件动态获取
+    """
+    season = db.query(Season).filter(
+        Season.id == season_id,
+        Season.is_active == True
+    ).first()
+    
+    if not season:
+        raise HTTPException(status_code=404, detail="季不存在")
+    
+    if not season.all_json_url:
+        raise HTTPException(status_code=404, detail="该季未配置 all.json URL")
+    
+    # 构建单集 JSON 的 URL
+    base_url = get_base_url(season.all_json_url)
+    # 先获取 all.json 找到对应的 id
+    all_data = await fetch_json(season.all_json_url)
+    
+    episode_id = None
+    for item in all_data:
+        if item["name"] == episode_name:
+            episode_id = item["id"]
+            break
+    
+    if episode_id is None:
+        raise HTTPException(status_code=404, detail="集不存在")
+    
+    # 获取单集 JSON
+    # 假设单集 JSON 路径为: base_url/episode_name/episode_name.json
+    episode_json_url = f"{base_url}{episode_name}/{episode_name}.json"
+    
+    try:
+        episode_data = await fetch_json(episode_json_url)
+        return AppEpisodeResponse(
+            id=episode_id,
+            name=episode_name,
+            seasonId=season_id,
+            title=episode_data.get("title", episode_name),
+            titleCN=episode_data.get("title_cn"),
+            thumbnail=episode_data.get("thumbnail")
+        )
+    except:
+        # 如果获取失败，返回基本信息
+        return AppEpisodeResponse(
+            id=episode_id,
+            name=episode_name,
+            seasonId=season_id,
+            title=episode_name,
+            titleCN=None,
+            thumbnail=None
+        )
+
+
+@router.get("/seasons/{season_id}/episodes/{episode_name}/clips", response_model=List[AppDubbingClipResponse])
+async def get_clips(season_id: str, episode_name: str, db: Session = Depends(get_db)):
+    """
+    获取配音片段列表
+    从单集的 JSON 文件动态获取
+    """
+    season = db.query(Season).filter(
+        Season.id == season_id,
+        Season.is_active == True
+    ).first()
+    
+    if not season:
+        raise HTTPException(status_code=404, detail="季不存在")
+    
+    if not season.all_json_url:
+        raise HTTPException(status_code=404, detail="该季未配置 all.json URL")
+    
+    # 构建单集 JSON 的 URL
+    base_url = get_base_url(season.all_json_url)
+    episode_json_url = f"{base_url}{episode_name}/{episode_name}.json"
+    
+    episode_data = await fetch_json(episode_json_url)
+    
+    clips = []
+    for i, clip in enumerate(episode_data.get("clips", [])):
+        # 构建完整的 clip 路径
+        clip_path = f"{episode_name}/{clip.get('video_url', '')}"
+        
+        # 构建完整的视频 URL
+        video_url = f"{base_url}{clip_path}"
+        
+        # 构建缩略图 URL
+        thumbnail = clip.get("thumbnail")
+        if thumbnail:
+            thumbnail = f"{base_url}{episode_name}/{thumbnail}"
+        
+        clips.append(AppDubbingClipResponse(
+            clipPath=clip_path,
+            videoUrl=video_url,
+            originalText=clip.get("original_text", ""),
+            translationCN=clip.get("translation_cn"),
+            thumbnail=thumbnail,
+            duration=clip.get("duration", 0)
+        ))
+    
+    return clips
 
 
 @router.get("/user/{user_id}/stats", response_model=UserLearningStatsResponse)
@@ -169,3 +262,34 @@ def get_user_stats(user_id: str, db: Session = Depends(get_db)):
         average_score=average_score,
         learning_days=learning_days
     )
+
+
+@router.get("/user/{user_id}/records")
+def get_user_records(
+    user_id: str, 
+    clip_path: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """获取用户配音记录"""
+    query = db.query(DubbingRecord).filter(DubbingRecord.user_id == user_id)
+    
+    if clip_path:
+        query = query.filter(DubbingRecord.clip_path == clip_path)
+    
+    records = query.order_by(DubbingRecord.created_at.desc()).offset(skip).limit(limit).all()
+    
+    import json
+    return [
+        {
+            "id": r.id,
+            "clipPath": r.clip_path,
+            "seasonId": r.season_id,
+            "score": r.score,
+            "feedback": r.feedback,
+            "wordScores": json.loads(r.word_scores) if r.word_scores else [],
+            "createdAt": r.created_at.isoformat() if r.created_at else None
+        }
+        for r in records
+    ]

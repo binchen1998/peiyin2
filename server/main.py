@@ -22,6 +22,8 @@ from database import init_db, get_db, init_sample_data, DubbingRecord
 from admin_routes import router as admin_router
 from app_routes import router as app_router
 
+# 添加 httpx 到依赖（用于 app_routes 中的远程 JSON 请求）
+
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -124,8 +126,9 @@ class ScoreResponse(BaseModel):
 async def score_audio(
     audio: UploadFile = File(...),
     text: str = Form(...),
-    clip_id: str = Form(...),
+    clip_path: str = Form(...),
     user_id: str = Form(None),
+    season_id: str = Form(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -134,13 +137,14 @@ async def score_audio(
     Args:
         audio: 上传的音频文件
         text: 需要对齐的原文文本
-        clip_id: 配音片段ID
+        clip_path: 配音片段的完整路径
         user_id: 用户ID（可选）
+        season_id: 季ID（可选，用于跳转回配音页面）
     
     Returns:
         评分结果
     """
-    logger.info(f"收到评分请求: clip_id={clip_id}, text={text}")
+    logger.info(f"收到评分请求: clip_path={clip_path}, season_id={season_id}, text={text}")
     
     try:
         # 保存上传的音频文件到临时目录
@@ -162,7 +166,8 @@ async def score_audio(
         # 保存配音记录到数据库
         try:
             record = DubbingRecord(
-                clip_id=clip_id,
+                clip_path=clip_path,
+                season_id=season_id,
                 user_id=user_id,
                 score=result["overallScore"],
                 feedback=result["feedback"],

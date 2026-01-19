@@ -12,7 +12,7 @@ import {
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -116,6 +116,7 @@ const BADGES: Badge[] = [
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
+  const router = useRouter();
   const { profile, saveProfile, getAge } = useUserProfile();
   
   const [showEditModal, setShowEditModal] = useState(false);
@@ -265,9 +266,16 @@ export default function ProfileScreen() {
 
         {/* 学习统计 */}
         <View style={[styles.statsCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>
-            📊 学习统计
-          </ThemedText>
+          <View style={styles.statsHeader}>
+            <ThemedText style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
+              📊 学习统计
+            </ThemedText>
+            <Pressable onPress={() => router.push('/records')}>
+              <ThemedText style={[styles.viewAllButton, { color: colors.primary }]}>
+                所有配音 →
+              </ThemedText>
+            </Pressable>
+          </View>
           <View style={styles.statsGrid}>
             <View style={styles.statItem}>
               <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>配音次数</ThemedText>
@@ -545,6 +553,16 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     padding: 16,
     marginBottom: 16,
+  },
+  statsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  viewAllButton: {
+    fontSize: 14,
+    fontWeight: '500',
   },
   sectionTitle: {
     fontSize: 16,

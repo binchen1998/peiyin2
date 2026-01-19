@@ -13,21 +13,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from database import (
-    get_db, Cartoon, Season, Episode, DubbingClip, DubbingRecord,
-    verify_admin, change_admin_password, AdminUser
+    get_db, Cartoon, Season, DubbingRecord, AdminToken,
+    verify_admin, change_admin_password, AdminUser,
+    create_token, get_token, delete_token, cleanup_expired_tokens
 )
 from schemas import (
     CartoonCreate, CartoonUpdate, CartoonResponse, CartoonListResponse,
     SeasonCreate, SeasonUpdate, SeasonResponse, SeasonListResponse,
-    EpisodeCreate, EpisodeUpdate, EpisodeResponse, EpisodeListResponse,
-    DubbingClipCreate, DubbingClipUpdate, DubbingClipResponse,
     DubbingRecordResponse, StatsResponse
 )
 
 router = APIRouter(prefix="/admin", tags=["后台管理"])
-
-# 存储有效的token（简单实现，生产环境建议使用Redis）
-valid_tokens = {}
 
 
 def generate_token():
@@ -46,44 +42,46 @@ def admin_login(
     admin = verify_admin(db, username, password)
     
     if admin:
+        # 清理过期的 token
+        cleanup_expired_tokens(db)
+        
         # 生成token
         token = generate_token()
-        # 保存token，有效期24小时
-        valid_tokens[token] = {
-            "username": username,
-            "expires": datetime.now() + timedelta(hours=24)
-        }
+        # 保存token到数据库，有效期7天（服务重启后仍有效）
+        expires_at = datetime.utcnow() + timedelta(days=7)
+        create_token(db, token, username, expires_at)
+        
         return {"success": True, "token": token, "message": "登录成功"}
     else:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
 
 @router.post("/logout")
-def admin_logout(authorization: str = Header(None)):
+def admin_logout(authorization: str = Header(None), db: Session = Depends(get_db)):
     """管理员登出"""
     if authorization and authorization.startswith("Bearer "):
         token = authorization[7:]
-        if token in valid_tokens:
-            del valid_tokens[token]
+        delete_token(db, token)
     return {"success": True, "message": "已登出"}
 
 
 @router.get("/verify")
-def verify_token(authorization: str = Header(None)):
+def verify_token_api(authorization: str = Header(None), db: Session = Depends(get_db)):
     """验证token是否有效"""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="未登录")
     
     token = authorization[7:]
-    if token not in valid_tokens:
+    token_data = get_token(db, token)
+    
+    if not token_data:
         raise HTTPException(status_code=401, detail="token无效")
     
-    token_data = valid_tokens[token]
-    if datetime.now() > token_data["expires"]:
-        del valid_tokens[token]
+    if datetime.utcnow() > token_data.expires_at:
+        delete_token(db, token)
         raise HTTPException(status_code=401, detail="token已过期")
     
-    return {"success": True, "username": token_data["username"]}
+    return {"success": True, "username": token_data.username}
 
 
 @router.post("/change-password")
@@ -99,15 +97,16 @@ def api_change_password(
         raise HTTPException(status_code=401, detail="未登录")
     
     token = authorization[7:]
-    if token not in valid_tokens:
+    token_data = get_token(db, token)
+    
+    if not token_data:
         raise HTTPException(status_code=401, detail="token无效")
     
-    token_data = valid_tokens[token]
-    if datetime.now() > token_data["expires"]:
-        del valid_tokens[token]
+    if datetime.utcnow() > token_data.expires_at:
+        delete_token(db, token)
         raise HTTPException(status_code=401, detail="token已过期")
     
-    username = token_data["username"]
+    username = token_data.username
     
     # 验证旧密码
     admin = verify_admin(db, username, old_password)
@@ -132,8 +131,6 @@ def get_stats(db: Session = Depends(get_db)):
     """获取统计数据"""
     total_cartoons = db.query(Cartoon).count()
     total_seasons = db.query(Season).count()
-    total_episodes = db.query(Episode).count()
-    total_clips = db.query(DubbingClip).count()
     total_records = db.query(DubbingRecord).count()
     
     # 最近的配音记录
@@ -144,8 +141,8 @@ def get_stats(db: Session = Depends(get_db)):
     return StatsResponse(
         total_cartoons=total_cartoons,
         total_seasons=total_seasons,
-        total_episodes=total_episodes,
-        total_clips=total_clips,
+        total_episodes=0,  # 从 JSON 动态获取，不再统计
+        total_clips=0,  # 从 JSON 动态获取，不再统计
         total_records=total_records,
         recent_records=recent_records
     )
@@ -244,13 +241,12 @@ def list_seasons(
     seasons = query.order_by(Season.number).all()
     result = []
     for season in seasons:
-        episode_count = db.query(Episode).filter(Episode.season_id == season.id).count()
         result.append(SeasonListResponse(
             id=season.id,
             cartoon_id=season.cartoon_id,
             number=season.number,
-            is_active=season.is_active,
-            episode_count=episode_count
+            all_json_url=season.all_json_url,
+            is_active=season.is_active
         ))
     return result
 
@@ -307,173 +303,18 @@ def delete_season(season_id: str, db: Session = Depends(get_db)):
     return {"message": "删除成功"}
 
 
-# ===== 集管理 =====
-@router.get("/episodes", response_model=List[EpisodeListResponse])
-def list_episodes(
-    season_id: Optional[str] = None,
-    db: Session = Depends(get_db)
-):
-    """获取集列表"""
-    query = db.query(Episode)
-    if season_id:
-        query = query.filter(Episode.season_id == season_id)
-    
-    episodes = query.order_by(Episode.number).all()
-    result = []
-    for episode in episodes:
-        clip_count = db.query(DubbingClip).filter(DubbingClip.episode_id == episode.id).count()
-        result.append(EpisodeListResponse(
-            id=episode.id,
-            season_id=episode.season_id,
-            number=episode.number,
-            title=episode.title,
-            title_cn=episode.title_cn,
-            thumbnail=episode.thumbnail,
-            is_active=episode.is_active,
-            clip_count=clip_count
-        ))
-    return result
-
-
-@router.post("/episodes", response_model=EpisodeResponse)
-def create_episode(episode: EpisodeCreate, db: Session = Depends(get_db)):
-    """创建集"""
-    # 检查季是否存在
-    season = db.query(Season).filter(Season.id == episode.season_id).first()
-    if not season:
-        raise HTTPException(status_code=404, detail="季不存在")
-    
-    # 检查ID是否已存在
-    existing = db.query(Episode).filter(Episode.id == episode.id).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="集ID已存在")
-    
-    db_episode = Episode(**episode.model_dump())
-    db.add(db_episode)
-    db.commit()
-    db.refresh(db_episode)
-    return db_episode
-
-
-@router.put("/episodes/{episode_id}", response_model=EpisodeResponse)
-def update_episode(
-    episode_id: str,
-    episode: EpisodeUpdate,
-    db: Session = Depends(get_db)
-):
-    """更新集"""
-    db_episode = db.query(Episode).filter(Episode.id == episode_id).first()
-    if not db_episode:
-        raise HTTPException(status_code=404, detail="集不存在")
-    
-    update_data = episode.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_episode, key, value)
-    
-    db.commit()
-    db.refresh(db_episode)
-    return db_episode
-
-
-@router.delete("/episodes/{episode_id}")
-def delete_episode(episode_id: str, db: Session = Depends(get_db)):
-    """删除集"""
-    db_episode = db.query(Episode).filter(Episode.id == episode_id).first()
-    if not db_episode:
-        raise HTTPException(status_code=404, detail="集不存在")
-    
-    db.delete(db_episode)
-    db.commit()
-    return {"message": "删除成功"}
-
-
-# ===== 配音片段管理 =====
-@router.get("/clips", response_model=List[DubbingClipResponse])
-def list_clips(
-    episode_id: Optional[str] = None,
-    db: Session = Depends(get_db)
-):
-    """获取配音片段列表"""
-    query = db.query(DubbingClip)
-    if episode_id:
-        query = query.filter(DubbingClip.episode_id == episode_id)
-    
-    return query.order_by(DubbingClip.order).all()
-
-
-@router.get("/clips/{clip_id}", response_model=DubbingClipResponse)
-def get_clip(clip_id: str, db: Session = Depends(get_db)):
-    """获取配音片段详情"""
-    clip = db.query(DubbingClip).filter(DubbingClip.id == clip_id).first()
-    if not clip:
-        raise HTTPException(status_code=404, detail="配音片段不存在")
-    return clip
-
-
-@router.post("/clips", response_model=DubbingClipResponse)
-def create_clip(clip: DubbingClipCreate, db: Session = Depends(get_db)):
-    """创建配音片段"""
-    # 检查集是否存在
-    episode = db.query(Episode).filter(Episode.id == clip.episode_id).first()
-    if not episode:
-        raise HTTPException(status_code=404, detail="集不存在")
-    
-    # 检查ID是否已存在
-    existing = db.query(DubbingClip).filter(DubbingClip.id == clip.id).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="配音片段ID已存在")
-    
-    db_clip = DubbingClip(**clip.model_dump())
-    db.add(db_clip)
-    db.commit()
-    db.refresh(db_clip)
-    return db_clip
-
-
-@router.put("/clips/{clip_id}", response_model=DubbingClipResponse)
-def update_clip(
-    clip_id: str,
-    clip: DubbingClipUpdate,
-    db: Session = Depends(get_db)
-):
-    """更新配音片段"""
-    db_clip = db.query(DubbingClip).filter(DubbingClip.id == clip_id).first()
-    if not db_clip:
-        raise HTTPException(status_code=404, detail="配音片段不存在")
-    
-    update_data = clip.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_clip, key, value)
-    
-    db.commit()
-    db.refresh(db_clip)
-    return db_clip
-
-
-@router.delete("/clips/{clip_id}")
-def delete_clip(clip_id: str, db: Session = Depends(get_db)):
-    """删除配音片段"""
-    db_clip = db.query(DubbingClip).filter(DubbingClip.id == clip_id).first()
-    if not db_clip:
-        raise HTTPException(status_code=404, detail="配音片段不存在")
-    
-    db.delete(db_clip)
-    db.commit()
-    return {"message": "删除成功"}
-
-
 # ===== 配音记录 =====
 @router.get("/records", response_model=List[DubbingRecordResponse])
 def list_records(
-    clip_id: Optional[str] = None,
+    clip_path: Optional[str] = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
     """获取配音记录列表"""
     query = db.query(DubbingRecord)
-    if clip_id:
-        query = query.filter(DubbingRecord.clip_id == clip_id)
+    if clip_path:
+        query = query.filter(DubbingRecord.clip_path == clip_path)
     
     return query.order_by(DubbingRecord.created_at.desc()).offset(skip).limit(limit).all()
 
@@ -520,7 +361,7 @@ async def upload_file(
 # ===== 数据导出/导入 =====
 @router.get("/export")
 def export_data(db: Session = Depends(get_db)):
-    """导出所有动画片数据为JSON"""
+    """导出所有动画片数据为JSON（只包含动画片和季的基本信息）"""
     cartoons = db.query(Cartoon).all()
     
     export_data = []
@@ -540,44 +381,14 @@ def export_data(db: Session = Depends(get_db)):
             season_data = {
                 "id": season.id,
                 "number": season.number,
-                "is_active": season.is_active,
-                "episodes": []
+                "all_json_url": season.all_json_url,
+                "is_active": season.is_active
             }
-            
-            episodes = db.query(Episode).filter(Episode.season_id == season.id).order_by(Episode.number).all()
-            for episode in episodes:
-                episode_data = {
-                    "id": episode.id,
-                    "number": episode.number,
-                    "title": episode.title,
-                    "title_cn": episode.title_cn,
-                    "thumbnail": episode.thumbnail,
-                    "is_active": episode.is_active,
-                    "clips": []
-                }
-                
-                clips = db.query(DubbingClip).filter(DubbingClip.episode_id == episode.id).order_by(DubbingClip.order).all()
-                for clip in clips:
-                    clip_data = {
-                        "id": clip.id,
-                        "order": clip.order,
-                        "video_url": clip.video_url,
-                        "original_text": clip.original_text,
-                        "translation_cn": clip.translation_cn,
-                        "start_time": clip.start_time,
-                        "end_time": clip.end_time,
-                        "character": clip.character,
-                        "is_active": clip.is_active
-                    }
-                    episode_data["clips"].append(clip_data)
-                
-                season_data["episodes"].append(episode_data)
-            
             cartoon_data["seasons"].append(season_data)
         
         export_data.append(cartoon_data)
     
-    return {"cartoons": export_data, "version": "1.0"}
+    return {"cartoons": export_data, "version": "2.0"}
 
 
 @router.post("/import")
@@ -586,7 +397,7 @@ async def import_data(
     replace: bool = Form(False),  # 是否替换现有数据
     db: Session = Depends(get_db)
 ):
-    """从JSON文件导入动画片数据"""
+    """从JSON文件导入动画片数据（只导入动画片和季的基本信息）"""
     try:
         content = await file.read()
         data = json.loads(content.decode('utf-8'))
@@ -596,17 +407,13 @@ async def import_data(
         
         # 如果选择替换，先删除所有现有数据
         if replace:
-            db.query(DubbingClip).delete()
-            db.query(Episode).delete()
             db.query(Season).delete()
             db.query(Cartoon).delete()
             db.commit()
         
         imported_count = {
             "cartoons": 0,
-            "seasons": 0,
-            "episodes": 0,
-            "clips": 0
+            "seasons": 0
         }
         
         for cartoon_data in data["cartoons"]:
@@ -634,41 +441,11 @@ async def import_data(
                     id=season_data["id"],
                     cartoon_id=cartoon_data["id"],
                     number=season_data.get("number", 1),
+                    all_json_url=season_data.get("all_json_url"),
                     is_active=season_data.get("is_active", True)
                 )
                 db.add(season)
                 imported_count["seasons"] += 1
-                
-                # 导入集
-                for episode_data in season_data.get("episodes", []):
-                    episode = Episode(
-                        id=episode_data["id"],
-                        season_id=season_data["id"],
-                        number=episode_data.get("number", 1),
-                        title=episode_data.get("title"),
-                        title_cn=episode_data.get("title_cn"),
-                        thumbnail=episode_data.get("thumbnail"),
-                        is_active=episode_data.get("is_active", True)
-                    )
-                    db.add(episode)
-                    imported_count["episodes"] += 1
-                    
-                    # 导入配音片段
-                    for clip_data in episode_data.get("clips", []):
-                        clip = DubbingClip(
-                            id=clip_data["id"],
-                            episode_id=episode_data["id"],
-                            order=clip_data.get("order", 1),
-                            video_url=clip_data.get("video_url"),
-                            original_text=clip_data.get("original_text", ""),
-                            translation_cn=clip_data.get("translation_cn"),
-                            start_time=clip_data.get("start_time", 0),
-                            end_time=clip_data.get("end_time", 0),
-                            character=clip_data.get("character"),
-                            is_active=clip_data.get("is_active", True)
-                        )
-                        db.add(clip)
-                        imported_count["clips"] += 1
         
         db.commit()
         return {

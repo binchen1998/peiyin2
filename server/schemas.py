@@ -52,6 +52,7 @@ class CartoonListResponse(BaseModel):
 # ===== 季 =====
 class SeasonBase(BaseModel):
     number: int
+    all_json_url: Optional[str] = None  # all.json 的 URL
     is_active: bool = True
 
 
@@ -62,6 +63,7 @@ class SeasonCreate(SeasonBase):
 
 class SeasonUpdate(BaseModel):
     number: Optional[int] = None
+    all_json_url: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -78,102 +80,45 @@ class SeasonListResponse(BaseModel):
     id: str
     cartoon_id: str
     number: int
+    all_json_url: Optional[str]
     is_active: bool
-    episode_count: int = 0
     
     class Config:
         from_attributes = True
 
 
-# ===== 集 =====
-class EpisodeBase(BaseModel):
-    number: int
-    title: Optional[str] = None
+# ===== 集（从 JSON 动态获取，不存储在数据库）=====
+class EpisodeFromJson(BaseModel):
+    """从 all.json 获取的集信息"""
+    id: int  # 在 all.json 中的序号
+    name: str  # 目录名称
+
+
+class EpisodeDetailFromJson(BaseModel):
+    """从单集 JSON 获取的详细信息"""
+    title: str
     title_cn: Optional[str] = None
     thumbnail: Optional[str] = None
-    is_active: bool = True
+    source_video: Optional[str] = None
 
 
-class EpisodeCreate(EpisodeBase):
-    id: str
-    season_id: str
-
-
-class EpisodeUpdate(BaseModel):
-    number: Optional[int] = None
-    title: Optional[str] = None
-    title_cn: Optional[str] = None
-    thumbnail: Optional[str] = None
-    is_active: Optional[bool] = None
-
-
-class EpisodeResponse(EpisodeBase):
-    id: str
-    season_id: str
-    created_at: datetime
-    
-    class Config:
-        from_attributes = True
-
-
-class EpisodeListResponse(BaseModel):
-    id: str
-    season_id: str
-    number: int
-    title: Optional[str]
-    title_cn: Optional[str]
-    thumbnail: Optional[str]
-    is_active: bool
-    clip_count: int = 0
-    
-    class Config:
-        from_attributes = True
-
-
-# ===== 配音片段 =====
-class DubbingClipBase(BaseModel):
-    order: int
-    video_url: Optional[str] = None
+# ===== 配音片段（从 JSON 动态获取，不存储在数据库）=====
+class ClipFromJson(BaseModel):
+    """从单集 JSON 获取的配音片段"""
+    video_url: str
     original_text: str
     translation_cn: Optional[str] = None
-    start_time: float = 0
-    end_time: float = 0
-    character: Optional[str] = None
-    is_active: bool = True
-
-
-class DubbingClipCreate(DubbingClipBase):
-    id: str
-    episode_id: str
-
-
-class DubbingClipUpdate(BaseModel):
-    order: Optional[int] = None
-    video_url: Optional[str] = None
-    original_text: Optional[str] = None
-    translation_cn: Optional[str] = None
-    start_time: Optional[float] = None
-    end_time: Optional[float] = None
-    character: Optional[str] = None
-    is_active: Optional[bool] = None
-
-
-class DubbingClipResponse(DubbingClipBase):
-    id: str
-    episode_id: str
-    created_at: datetime
-    
-    class Config:
-        from_attributes = True
+    thumbnail: Optional[str] = None
+    duration: float = 0
 
 
 # ===== 配音记录 =====
 class DubbingRecordResponse(BaseModel):
     id: int
-    clip_id: str
-    user_id: Optional[str]
-    score: Optional[int]
-    feedback: Optional[str]
+    clip_path: Optional[str] = None  # clip 的完整路径
+    user_id: Optional[str] = None
+    score: Optional[int] = None
+    feedback: Optional[str] = None
     created_at: datetime
     
     class Config:
@@ -214,33 +159,31 @@ class AppSeasonResponse(BaseModel):
     id: str
     number: int
     cartoonId: str
+    allJsonUrl: Optional[str]
     
     class Config:
         from_attributes = True
 
 
 class AppEpisodeResponse(BaseModel):
-    id: str
-    number: int
-    title: Optional[str]
-    titleCN: Optional[str]
-    thumbnail: Optional[str]
+    """从 all.json 动态获取的集信息"""
+    id: int  # 在 all.json 中的序号
+    name: str  # 目录名称
     seasonId: str
-    
-    class Config:
-        from_attributes = True
+    # 以下字段从单集 JSON 获取
+    title: Optional[str] = None
+    titleCN: Optional[str] = None
+    thumbnail: Optional[str] = None
 
 
 class AppDubbingClipResponse(BaseModel):
-    id: str
-    episodeId: str
-    order: int
-    videoUrl: Optional[str]
+    """从单集 JSON 动态获取的配音片段"""
+    clipPath: str  # 完整路径，如 "CE001 Muddy Puddles/clips/clip_1.mp4"
+    videoUrl: str
     originalText: str
     translationCN: Optional[str]
-    startTime: float
-    endTime: float
-    character: Optional[str]
+    thumbnail: Optional[str]
+    duration: float
     
     class Config:
         from_attributes = True
