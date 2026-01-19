@@ -432,18 +432,22 @@ export default function DubbingScreen() {
         {recordingStatus === 'scored' && scoringResult && (
           <View style={styles.scoreSection}>
             <View style={[styles.scoreCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-              <ThemedText style={[styles.scoreLabel, { color: colors.textSecondary }]}>
-                总分
-              </ThemedText>
-              <View style={styles.scoreHeader}>
-                <ThemedText style={[styles.scoreValue, { color: getScoreColor(scoringResult.overallScore ?? 0) }]}>
+              {/* 总分区域 - 使用独立容器 */}
+              <View style={styles.totalScoreContainer}>
+                <ThemedText style={[styles.totalScoreLabel, { color: colors.textSecondary }]}>
+                  总分
+                </ThemedText>
+                <ThemedText style={[styles.totalScoreNumber, { color: getScoreColor(scoringResult.overallScore ?? 0) }]}>
                   {Math.round(scoringResult.overallScore ?? 0)}
                 </ThemedText>
               </View>
               
-              <ThemedText style={[styles.scoreFeedback, { color: colors.text }]}>
-                {getScoreFeedback(scoringResult.overallScore ?? 0)}
-              </ThemedText>
+              {/* 反馈文字 */}
+              <View style={styles.feedbackContainer}>
+                <ThemedText style={[styles.scoreFeedback, { color: colors.text }]}>
+                  {getScoreFeedback(scoringResult.overallScore ?? 0)}
+                </ThemedText>
+              </View>
 
               {/* 单词评分 */}
               <View style={styles.wordScores}>
@@ -658,30 +662,32 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 2,
     padding: 20,
-    overflow: 'visible',
   },
-  scoreLabel: {
-    fontSize: 14,
-    marginBottom: 8,
-    zIndex: 1,
-  },
-  scoreHeader: {
+  totalScoreContainer: {
     alignItems: 'center',
-    marginBottom: 16,
-    zIndex: 10,
-    position: 'relative',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    marginBottom: 10,
   },
-  scoreValue: {
+  totalScoreLabel: {
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  totalScoreNumber: {
     fontSize: 72,
     fontWeight: 'bold',
-    zIndex: 10,
-    position: 'relative',
+    lineHeight: 80,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+  },
+  feedbackContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
   },
   scoreFeedback: {
     fontSize: 20,
     fontWeight: '600',
     textAlign: 'center',
-    marginBottom: 20,
   },
   wordScores: {
     marginBottom: 20,
