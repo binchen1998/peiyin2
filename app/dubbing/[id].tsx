@@ -658,18 +658,24 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 2,
     padding: 20,
+    overflow: 'visible',
   },
   scoreLabel: {
     fontSize: 14,
     marginBottom: 8,
+    zIndex: 1,
   },
   scoreHeader: {
     alignItems: 'center',
     marginBottom: 16,
+    zIndex: 10,
+    position: 'relative',
   },
   scoreValue: {
     fontSize: 72,
     fontWeight: 'bold',
+    zIndex: 10,
+    position: 'relative',
   },
   scoreFeedback: {
     fontSize: 20,
