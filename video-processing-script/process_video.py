@@ -15,6 +15,27 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 from openai import OpenAI
+from dotenv import load_dotenv
+
+# 获取脚本所在目录
+SCRIPT_DIR = Path(__file__).parent.resolve()
+ENV_FILE = SCRIPT_DIR / ".env"
+
+# 检查 .env 文件是否存在
+if not ENV_FILE.exists():
+    print(f"错误: 找不到 .env 文件: {ENV_FILE}")
+    print("请在脚本所在目录创建 .env 文件，并添加 OPENAI_API_KEY=your_api_key")
+    sys.exit(1)
+
+# 加载 .env 文件
+load_dotenv(ENV_FILE)
+
+# 检查 API Key 是否存在
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    print("错误: .env 文件中未设置 OPENAI_API_KEY")
+    print("请在 .env 文件中添加: OPENAI_API_KEY=your_api_key")
+    sys.exit(1)
 
 # 配置
 WHISPER_EXE = r"D:\Faster-Whisper-XXL_r192.3.3_windows\Faster-Whisper-XXL\faster-whisper-xxl.exe"
@@ -645,8 +666,9 @@ def main():
   指定片段数量:
     python process_video.py video.mp4 --api-key YOUR_API_KEY --clips 15
 
-环境变量:
-  也可以通过 OPENAI_API_KEY 环境变量设置 API Key
+配置文件:
+  需要在脚本所在目录创建 .env 文件，内容如下:
+  OPENAI_API_KEY=your_api_key_here
         """
     )
     
@@ -656,8 +678,8 @@ def main():
     )
     parser.add_argument(
         "--api-key",
-        help="OpenAI API Key (也可通过 OPENAI_API_KEY 环境变量设置)",
-        default="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"
+        help="OpenAI API Key (默认从 .env 文件读取 OPENAI_API_KEY)",
+        default=OPENAI_API_KEY
     )
     parser.add_argument(
         "--clips",
@@ -673,10 +695,10 @@ def main():
     
     args = parser.parse_args()
     
-    # 检查 API Key
+    # 检查 API Key (此时 .env 已经在脚本开头检查过，这里是额外检查)
     if not args.api_key:
         print("错误: 请提供 OpenAI API Key")
-        print("使用 --api-key 参数或设置 OPENAI_API_KEY 环境变量")
+        print("在 .env 文件中设置 OPENAI_API_KEY 或使用 --api-key 参数")
         sys.exit(1)
     
     # 检查 faster-whisper-xxl 是否存在
