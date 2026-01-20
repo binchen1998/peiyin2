@@ -96,6 +96,8 @@ class Cartoon(Base):
     thumbnail = Column(String(500))  # 缩略图URL
     description = Column(Text)  # 描述
     is_active = Column(Boolean, default=True)  # 是否启用
+    is_featured = Column(Boolean, default=False)  # 是否在首页显示
+    sort_order = Column(Integer, default=0)  # 排序顺序（越小越靠前）
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -131,6 +133,23 @@ class DubbingRecord(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class RecommendedClip(Base):
+    """首页推荐片段（由后台随机生成，所有用户看到相同内容）"""
+    __tablename__ = "recommended_clips"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    season_id = Column(String(50), nullable=False)  # 季ID
+    episode_name = Column(String(200), nullable=False)  # 集名称
+    clip_path = Column(String(500), nullable=False)  # clip 路径
+    video_url = Column(String(500), nullable=False)  # 视频URL
+    thumbnail = Column(String(500))  # 缩略图URL
+    original_text = Column(String(500))  # 原文
+    translation_cn = Column(String(500))  # 中文翻译
+    duration = Column(Float, default=0)  # 时长
+    sort_order = Column(Integer, default=0)  # 排序
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # ===== 数据库操作 =====
 
 def migrate_db():
@@ -138,6 +157,24 @@ def migrate_db():
     from sqlalchemy import inspect, text
     
     inspector = inspect(engine)
+    
+    # 检查 cartoons 表是否存在
+    if 'cartoons' in inspector.get_table_names():
+        columns = [col['name'] for col in inspector.get_columns('cartoons')]
+        
+        # 添加 is_featured 列（如果不存在）
+        if 'is_featured' not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE cartoons ADD COLUMN is_featured BOOLEAN DEFAULT 0"))
+                conn.commit()
+                print("数据库迁移: 已添加 cartoons.is_featured 列")
+        
+        # 添加 sort_order 列（如果不存在）
+        if 'sort_order' not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE cartoons ADD COLUMN sort_order INTEGER DEFAULT 0"))
+                conn.commit()
+                print("数据库迁移: 已添加 cartoons.sort_order 列")
     
     # 检查 seasons 表是否存在
     if 'seasons' in inspector.get_table_names():
@@ -331,6 +368,26 @@ def cleanup_expired_tokens(db: Session):
     """清理过期的 token"""
     db.query(AdminToken).filter(AdminToken.expires_at < datetime.utcnow()).delete()
     db.commit()
+
+
+# ===== 推荐片段管理 =====
+def clear_recommended_clips(db: Session):
+    """清空所有推荐片段"""
+    db.query(RecommendedClip).delete()
+    db.commit()
+
+
+def add_recommended_clip(db: Session, clip_data: dict) -> RecommendedClip:
+    """添加推荐片段"""
+    clip = RecommendedClip(**clip_data)
+    db.add(clip)
+    db.commit()
+    return clip
+
+
+def get_recommended_clips(db: Session) -> list:
+    """获取所有推荐片段"""
+    return db.query(RecommendedClip).order_by(RecommendedClip.sort_order).all()
 
 
 # 初始化示例数据

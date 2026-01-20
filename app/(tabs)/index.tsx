@@ -16,11 +16,12 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { Cartoon } from '@/types';
-import { API_BASE_URL } from '@/config/api';
+import { Cartoon, RecommendedClip } from '@/types';
+import { API_BASE_URL, API_ENDPOINTS } from '@/config/api';
 
 const { width } = Dimensions.get('window');
-const CARD_WIDTH = (width - 48) / 2;
+const CARTOON_CARD_WIDTH = 140;
+const CLIP_CARD_WIDTH = (width - 48) / 2;
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme() ?? 'light';
@@ -28,20 +29,16 @@ export default function HomeScreen() {
   const router = useRouter();
   
   const [cartoons, setCartoons] = useState<Cartoon[]>([]);
+  const [recommendedClips, setRecommendedClips] = useState<RecommendedClip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // 从服务器获取动画片列表
-  const fetchCartoons = async (showRefreshing = false) => {
-    if (showRefreshing) {
-      setIsRefreshing(true);
-    }
-    
+  // 从服务器获取首页推荐的动画片（只获取 is_featured=true 的）
+  const fetchCartoons = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/app/cartoons`);
+      const response = await fetch(`${API_BASE_URL}/api/app/cartoons?featured_only=true`);
       if (response.ok) {
         const data = await response.json();
-        // 转换API响应格式
         const formattedCartoons: Cartoon[] = data.map((item: any) => ({
           id: item.id,
           name: item.name,
@@ -53,6 +50,30 @@ export default function HomeScreen() {
       }
     } catch (error) {
       console.error('获取动画片列表失败:', error);
+    }
+  };
+
+  // 获取推荐片段
+  const fetchRecommendedClips = async () => {
+    try {
+      const response = await fetch(API_ENDPOINTS.recommendations);
+      if (response.ok) {
+        const data = await response.json();
+        setRecommendedClips(data);
+      }
+    } catch (error) {
+      console.error('获取推荐片段失败:', error);
+    }
+  };
+
+  // 加载所有数据
+  const fetchAllData = async (showRefreshing = false) => {
+    if (showRefreshing) {
+      setIsRefreshing(true);
+    }
+    
+    try {
+      await Promise.all([fetchCartoons(), fetchRecommendedClips()]);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -62,17 +83,30 @@ export default function HomeScreen() {
   // 页面获得焦点时加载数据
   useFocusEffect(
     useCallback(() => {
-      fetchCartoons();
+      fetchAllData();
     }, [])
   );
 
   // 下拉刷新
   const onRefresh = useCallback(() => {
-    fetchCartoons(true);
+    fetchAllData(true);
   }, []);
 
   const handleCartoonPress = (cartoon: Cartoon) => {
     router.push(`/cartoon/${cartoon.id}`);
+  };
+
+  const handleClipPress = (clip: RecommendedClip) => {
+    // 直接进入配音页面
+    router.push({
+      pathname: '/dubbing/[id]',
+      params: {
+        id: encodeURIComponent(clip.clipPath),
+        seasonId: clip.seasonId,
+        episodeName: clip.episodeName,
+        index: '0'
+      }
+    });
   };
 
   return (
@@ -100,6 +134,7 @@ export default function HomeScreen() {
             />
           }
         >
+          {/* 热门动画片 - 横向滚动 */}
           <View style={styles.sectionHeader}>
             <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>
               🎭 热门动画片
@@ -107,19 +142,23 @@ export default function HomeScreen() {
           </View>
           
           {cartoons.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <ThemedText style={[styles.emptyIcon]}>🎬</ThemedText>
+            <View style={styles.emptyCartoonContainer}>
               <ThemedText style={[styles.emptyText, { color: colors.textSecondary }]}>
-                暂无动画片，请在后台添加
+                暂无动画片
               </ThemedText>
             </View>
           ) : (
-            <View style={styles.grid}>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalScrollContent}
+              style={styles.horizontalScroll}
+            >
               {cartoons.map((cartoon) => (
                 <Pressable
                   key={cartoon.id}
                   style={({ pressed }) => [
-                    styles.card,
+                    styles.cartoonCard,
                     { 
                       backgroundColor: colors.card,
                       borderColor: colors.cardBorder,
@@ -129,18 +168,82 @@ export default function HomeScreen() {
                   onPress={() => handleCartoonPress(cartoon)}
                 >
                   <Image
-                    source={{ uri: cartoon.thumbnail }}
-                    style={styles.cardImage}
+                    source={{ uri: cartoon.thumbnail || 'https://picsum.photos/140/100' }}
+                    style={styles.cartoonImage}
                     contentFit="cover"
                     transition={300}
                   />
-                  <View style={styles.cardContent}>
-                    <ThemedText style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
+                  <View style={styles.cartoonContent}>
+                    <ThemedText style={[styles.cartoonTitle, { color: colors.text }]} numberOfLines={1}>
                       {cartoon.nameCN}
                     </ThemedText>
-                    <ThemedText style={[styles.cardSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                    <ThemedText style={[styles.cartoonSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
                       {cartoon.name}
                     </ThemedText>
+                  </View>
+                </Pressable>
+              ))}
+            </ScrollView>
+          )}
+
+          {/* 推荐配音片段 */}
+          <View style={[styles.sectionHeader, { marginTop: 24 }]}>
+            <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>
+              ⭐ 推荐配音
+            </ThemedText>
+            <ThemedText style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
+              点击即可开始配音练习
+            </ThemedText>
+          </View>
+          
+          {recommendedClips.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <ThemedText style={[styles.emptyIcon]}>🎤</ThemedText>
+              <ThemedText style={[styles.emptyText, { color: colors.textSecondary }]}>
+                暂无推荐片段
+              </ThemedText>
+              <ThemedText style={[styles.emptyHint, { color: colors.textSecondary }]}>
+                请在后台管理生成推荐
+              </ThemedText>
+            </View>
+          ) : (
+            <View style={styles.clipGrid}>
+              {recommendedClips.map((clip) => (
+                <Pressable
+                  key={clip.id}
+                  style={({ pressed }) => [
+                    styles.clipCard,
+                    { 
+                      backgroundColor: colors.card,
+                      borderColor: colors.cardBorder,
+                      transform: [{ scale: pressed ? 0.95 : 1 }],
+                    },
+                  ]}
+                  onPress={() => handleClipPress(clip)}
+                >
+                  <Image
+                    source={{ uri: clip.thumbnail || 'https://picsum.photos/200/120' }}
+                    style={styles.clipImage}
+                    contentFit="cover"
+                    transition={300}
+                  />
+                  <View style={styles.clipPlayIcon}>
+                    <ThemedText style={styles.playIconText}>▶</ThemedText>
+                  </View>
+                  <View style={styles.clipDuration}>
+                    <ThemedText style={styles.durationText}>
+                      {clip.duration.toFixed(1)}s
+                    </ThemedText>
+                  </View>
+                  <View style={styles.clipContent}>
+                    <ThemedText style={[styles.clipText, { color: colors.text }]} numberOfLines={2}>
+                      {clip.originalText}
+                    </ThemedText>
+                    {clip.translationCN && (
+                      <ThemedText style={[styles.clipTranslation, { color: colors.textSecondary }]} numberOfLines={1}>
+                        {clip.translationCN}
+                      </ThemedText>
+                    )}
                   </View>
                 </Pressable>
               ))}
@@ -148,13 +251,11 @@ export default function HomeScreen() {
           )}
 
           {/* 底部提示 */}
-          {cartoons.length > 0 && (
-            <View style={styles.footer}>
-              <ThemedText style={[styles.footerText, { color: colors.textSecondary }]}>
-                👆 点击动画片开始你的配音之旅！
-              </ThemedText>
-            </View>
-          )}
+          <View style={styles.footer}>
+            <ThemedText style={[styles.footerText, { color: colors.textSecondary }]}>
+              👆 选择一个片段开始你的配音之旅！
+            </ThemedText>
+          </View>
         </ScrollView>
       )}
     </ThemedView>
@@ -178,63 +279,144 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 16,
     paddingTop: 60,
     paddingBottom: 40,
   },
   sectionHeader: {
-    marginBottom: 16,
+    marginBottom: 12,
+    paddingHorizontal: 16,
   },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '600',
   },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: 60,
+  sectionSubtitle: {
+    fontSize: 13,
+    marginTop: 4,
   },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
+  // 热门动画横向滚动样式
+  horizontalScroll: {
+    flexGrow: 0,
   },
-  emptyText: {
-    fontSize: 16,
+  horizontalScrollContent: {
+    paddingHorizontal: 16,
+    gap: 12,
   },
-  grid: {
+  cartoonCard: {
+    width: CARTOON_CARD_WIDTH,
+    borderRadius: 12,
+    borderWidth: 2,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cartoonImage: {
+    width: '100%',
+    height: 90,
+  },
+  cartoonContent: {
+    padding: 10,
+  },
+  cartoonTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  cartoonSubtitle: {
+    fontSize: 11,
+  },
+  emptyCartoonContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+  },
+  // 推荐片段网格样式
+  clipGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
+    paddingHorizontal: 16,
   },
-  card: {
-    width: CARD_WIDTH,
-    borderRadius: 16,
+  clipCard: {
+    width: CLIP_CARD_WIDTH,
+    borderRadius: 12,
     marginBottom: 16,
     borderWidth: 2,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowRadius: 6,
     elevation: 4,
   },
-  cardImage: {
+  clipImage: {
     width: '100%',
-    height: CARD_WIDTH * 0.7,
+    height: CLIP_CARD_WIDTH * 0.6,
   },
-  cardContent: {
-    padding: 12,
+  clipPlayIcon: {
+    position: 'absolute',
+    top: CLIP_CARD_WIDTH * 0.3 - 20,
+    left: '50%',
+    marginLeft: -20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  cardTitle: {
+  playIconText: {
+    color: 'white',
     fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
+    marginLeft: 2,
   },
-  cardSubtitle: {
-    fontSize: 12,
+  clipDuration: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  durationText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  clipContent: {
+    padding: 10,
+  },
+  clipText: {
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  clipTranslation: {
+    fontSize: 11,
+    marginTop: 4,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  emptyText: {
+    fontSize: 15,
+  },
+  emptyHint: {
+    fontSize: 13,
+    marginTop: 4,
   },
   footer: {
     marginTop: 20,
     alignItems: 'center',
+    paddingHorizontal: 16,
   },
   footerText: {
     fontSize: 14,

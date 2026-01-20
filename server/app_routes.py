@@ -11,12 +11,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
 from urllib.parse import urljoin
 
-from database import get_db, Cartoon, Season, DubbingRecord
+from database import get_db, Cartoon, Season, DubbingRecord, RecommendedClip, get_recommended_clips
 from schemas import (
     AppCartoonResponse, AppSeasonResponse, 
     AppEpisodeResponse, AppDubbingClipResponse,
-    UserLearningStatsResponse
+    UserLearningStatsResponse, AppRecommendedClipResponse,
+    PaginatedResponse
 )
+import math
 
 router = APIRouter(prefix="/api/app", tags=["App接口"])
 
@@ -40,11 +42,33 @@ def get_base_url(all_json_url: str) -> str:
     return all_json_url.rsplit('/', 1)[0] + '/'
 
 
-@router.get("/cartoons", response_model=List[AppCartoonResponse])
-def get_cartoons(db: Session = Depends(get_db)):
-    """获取动画片列表（仅启用的）"""
-    cartoons = db.query(Cartoon).filter(Cartoon.is_active == True).all()
-    return [
+@router.get("/cartoons")
+def get_cartoons(
+    featured_only: bool = False, 
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db)
+):
+    """
+    获取动画片列表（仅启用的）
+    featured_only: 是否只获取首页推荐的动画片
+    page: 页码，从1开始
+    page_size: 每页数量
+    """
+    query = db.query(Cartoon).filter(Cartoon.is_active == True)
+    
+    if featured_only:
+        query = query.filter(Cartoon.is_featured == True)
+    
+    # 获取总数
+    total = query.count()
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+    
+    # 按 sort_order 排序，分页
+    offset = (page - 1) * page_size
+    cartoons = query.order_by(Cartoon.sort_order, Cartoon.id).offset(offset).limit(page_size).all()
+    
+    items = [
         AppCartoonResponse(
             id=c.id,
             name=c.name,
@@ -54,6 +78,14 @@ def get_cartoons(db: Session = Depends(get_db)):
         )
         for c in cartoons
     ]
+    
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
 
 
 @router.get("/cartoons/{cartoon_id}", response_model=AppCartoonResponse)
@@ -76,15 +108,32 @@ def get_cartoon(cartoon_id: str, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/cartoons/{cartoon_id}/seasons", response_model=List[AppSeasonResponse])
-def get_seasons(cartoon_id: str, db: Session = Depends(get_db)):
-    """获取季列表"""
-    seasons = db.query(Season).filter(
+@router.get("/cartoons/{cartoon_id}/seasons")
+def get_seasons(
+    cartoon_id: str, 
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db)
+):
+    """
+    获取季列表
+    page: 页码，从1开始
+    page_size: 每页数量
+    """
+    query = db.query(Season).filter(
         Season.cartoon_id == cartoon_id,
         Season.is_active == True
-    ).order_by(Season.number).all()
+    )
     
-    return [
+    # 获取总数
+    total = query.count()
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+    
+    # 分页
+    offset = (page - 1) * page_size
+    seasons = query.order_by(Season.number).offset(offset).limit(page_size).all()
+    
+    items = [
         AppSeasonResponse(
             id=s.id,
             number=s.number,
@@ -93,13 +142,28 @@ def get_seasons(cartoon_id: str, db: Session = Depends(get_db)):
         )
         for s in seasons
     ]
+    
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
 
 
-@router.get("/seasons/{season_id}/episodes", response_model=List[AppEpisodeResponse])
-async def get_episodes(season_id: str, db: Session = Depends(get_db)):
+@router.get("/seasons/{season_id}/episodes")
+async def get_episodes(
+    season_id: str, 
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db)
+):
     """
     获取集列表
     从季的 all_json_url 动态获取
+    page: 页码，从1开始
+    page_size: 每页数量
     """
     season = db.query(Season).filter(
         Season.id == season_id,
@@ -116,18 +180,32 @@ async def get_episodes(season_id: str, db: Session = Depends(get_db)):
     all_data = await fetch_json(season.all_json_url)
     
     # all.json 格式: [{"id": 0, "name": "CE001 Muddy Puddles"}, ...]
-    episodes = []
-    for item in all_data:
-        episodes.append(AppEpisodeResponse(
+    total = len(all_data)
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+    
+    # 分页
+    offset = (page - 1) * page_size
+    paged_data = all_data[offset:offset + page_size]
+    
+    items = [
+        AppEpisodeResponse(
             id=item["id"],
             name=item["name"],
             seasonId=season_id,
             title=item["name"],  # 默认使用 name 作为标题
             titleCN=None,
             thumbnail=None
-        ))
+        )
+        for item in paged_data
+    ]
     
-    return episodes
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
 
 
 @router.get("/seasons/{season_id}/episodes/{episode_name}", response_model=AppEpisodeResponse)
@@ -187,11 +265,19 @@ async def get_episode_detail(season_id: str, episode_name: str, db: Session = De
         )
 
 
-@router.get("/seasons/{season_id}/episodes/{episode_name}/clips", response_model=List[AppDubbingClipResponse])
-async def get_clips(season_id: str, episode_name: str, db: Session = Depends(get_db)):
+@router.get("/seasons/{season_id}/episodes/{episode_name}/clips")
+async def get_clips(
+    season_id: str, 
+    episode_name: str, 
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db)
+):
     """
     获取配音片段列表
     从单集的 JSON 文件动态获取
+    page: 页码，从1开始
+    page_size: 每页数量
     """
     season = db.query(Season).filter(
         Season.id == season_id,
@@ -210,8 +296,16 @@ async def get_clips(season_id: str, episode_name: str, db: Session = Depends(get
     
     episode_data = await fetch_json(episode_json_url)
     
-    clips = []
-    for i, clip in enumerate(episode_data.get("clips", [])):
+    all_clips = episode_data.get("clips", [])
+    total = len(all_clips)
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+    
+    # 分页
+    offset = (page - 1) * page_size
+    paged_clips = all_clips[offset:offset + page_size]
+    
+    items = []
+    for clip in paged_clips:
         # 构建完整的 clip 路径
         clip_path = f"{episode_name}/{clip.get('video_url', '')}"
         
@@ -223,7 +317,7 @@ async def get_clips(season_id: str, episode_name: str, db: Session = Depends(get
         if thumbnail:
             thumbnail = f"{base_url}{episode_name}/{thumbnail}"
         
-        clips.append(AppDubbingClipResponse(
+        items.append(AppDubbingClipResponse(
             clipPath=clip_path,
             videoUrl=video_url,
             originalText=clip.get("original_text", ""),
@@ -232,7 +326,13 @@ async def get_clips(season_id: str, episode_name: str, db: Session = Depends(get
             duration=clip.get("duration", 0)
         ))
     
-    return clips
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
 
 
 @router.get("/user/{user_id}/stats", response_model=UserLearningStatsResponse)
@@ -268,20 +368,30 @@ def get_user_stats(user_id: str, db: Session = Depends(get_db)):
 def get_user_records(
     user_id: str, 
     clip_path: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 100,
+    page: int = 1,
+    page_size: int = 20,
     db: Session = Depends(get_db)
 ):
-    """获取用户配音记录"""
+    """
+    获取用户配音记录
+    page: 页码，从1开始
+    page_size: 每页数量
+    """
     query = db.query(DubbingRecord).filter(DubbingRecord.user_id == user_id)
     
     if clip_path:
         query = query.filter(DubbingRecord.clip_path == clip_path)
     
-    records = query.order_by(DubbingRecord.created_at.desc()).offset(skip).limit(limit).all()
+    # 获取总数
+    total = query.count()
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+    
+    # 分页
+    offset = (page - 1) * page_size
+    records = query.order_by(DubbingRecord.created_at.desc()).offset(offset).limit(page_size).all()
     
     import json
-    return [
+    items = [
         {
             "id": r.id,
             "clipPath": r.clip_path,
@@ -293,3 +403,55 @@ def get_user_records(
         }
         for r in records
     ]
+    
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
+
+
+@router.get("/recommendations")
+def get_recommendations(
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db)
+):
+    """
+    获取首页推荐片段（所有用户看到相同内容）
+    page: 页码，从1开始
+    page_size: 每页数量
+    """
+    # 获取所有推荐片段
+    all_clips = get_recommended_clips(db)
+    total = len(all_clips)
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+    
+    # 分页
+    offset = (page - 1) * page_size
+    paged_clips = all_clips[offset:offset + page_size]
+    
+    items = [
+        AppRecommendedClipResponse(
+            id=c.id,
+            seasonId=c.season_id,
+            episodeName=c.episode_name,
+            clipPath=c.clip_path,
+            videoUrl=c.video_url,
+            thumbnail=c.thumbnail,
+            originalText=c.original_text,
+            translationCN=c.translation_cn,
+            duration=c.duration
+        )
+        for c in paged_clips
+    ]
+    
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }

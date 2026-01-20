@@ -44,6 +44,19 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="library"
+        options={{
+          title: '配音库',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol 
+              size={28} 
+              name={focused ? "play.square.stack.fill" : "play.square.stack"} 
+              color={color} 
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="explore"
         options={{
           title: '我的',

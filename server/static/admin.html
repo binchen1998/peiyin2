@@ -587,6 +587,58 @@
             background: var(--bg-secondary);
         }
 
+        /* 排序控件 */
+        .sort-controls {
+            display: flex;
+            flex-direction: column;
+            margin-right: 8px;
+            gap: 2px;
+        }
+
+        .btn-sort {
+            width: 24px;
+            height: 16px;
+            border: 1px solid var(--border);
+            background: var(--card);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 10px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .btn-sort:hover {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        /* 首页勾选框 */
+        .featured-checkbox {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-right: 12px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .featured-checkbox input {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: var(--warning);
+        }
+
+        .featured-checkbox span {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
         .tree-toggle {
             width: 24px;
             height: 24px;
@@ -1127,6 +1179,22 @@
 
                 <div class="card">
                     <div class="card-header">
+                        <span class="card-title">⭐ 首页推荐片段</span>
+                        <div class="header-actions">
+                            <button class="btn btn-primary" onclick="generateRecommendations()">
+                                🎲 随机生成20个推荐
+                            </button>
+                        </div>
+                    </div>
+                    <div id="recommendations-container">
+                        <p style="color: var(--text-secondary); text-align: center; padding: 20px;">
+                            点击上方按钮生成推荐片段，所有用户首页将显示这些片段
+                        </p>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
                         <span class="card-title">📝 最近配音记录</span>
                     </div>
                     <div class="table-container">
@@ -1155,6 +1223,97 @@
                     </div>
                 </div>
             `;
+            
+            // 加载当前推荐片段
+            loadCurrentRecommendations();
+        }
+
+        // 加载当前推荐片段
+        async function loadCurrentRecommendations() {
+            const container = document.getElementById('recommendations-container');
+            if (!container) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/recommendations`, {
+                    headers: getAuthHeaders()
+                });
+                const clips = await res.json();
+                
+                if (clips.length === 0) {
+                    container.innerHTML = `
+                        <p style="color: var(--text-secondary); text-align: center; padding: 20px;">
+                            暂无推荐片段，点击上方按钮生成
+                        </p>
+                    `;
+                } else {
+                    container.innerHTML = `
+                        <p style="color: var(--text-secondary); margin-bottom: 12px;">
+                            当前已有 <strong>${clips.length}</strong> 个推荐片段
+                        </p>
+                        <div style="display: flex; flex-wrap: wrap; gap: 12px; max-height: 300px; overflow-y: auto;">
+                            ${clips.map((clip, i) => `
+                                <div style="background: var(--bg-secondary); border-radius: 8px; padding: 10px; width: calc(50% - 6px); display: flex; align-items: center; gap: 10px;">
+                                    <img src="${clip.thumbnail || 'https://picsum.photos/60/40'}" 
+                                         style="width: 60px; height: 40px; border-radius: 4px; object-fit: cover;"
+                                         onerror="this.src='https://picsum.photos/60/40'">
+                                    <div style="flex: 1; min-width: 0;">
+                                        <div style="font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                            ${clip.originalText || '无文本'}
+                                        </div>
+                                        <div style="font-size: 11px; color: var(--text-secondary);">
+                                            ${clip.episodeName.substring(0, 20)}...
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+            } catch (e) {
+                console.error('加载推荐片段失败:', e);
+                container.innerHTML = `
+                    <p style="color: var(--danger); text-align: center; padding: 20px;">
+                        加载失败，请刷新重试
+                    </p>
+                `;
+            }
+        }
+
+        // 生成推荐片段
+        async function generateRecommendations() {
+            if (!confirm('确定要重新生成推荐片段吗？这将替换当前所有推荐。')) {
+                return;
+            }
+            
+            const container = document.getElementById('recommendations-container');
+            container.innerHTML = `
+                <div style="text-align: center; padding: 40px;">
+                    <div class="loading"></div>
+                    <p style="color: var(--text-secondary); margin-top: 12px;">正在从所有片段中随机选择...</p>
+                    <p style="color: var(--text-secondary); font-size: 12px;">这可能需要一些时间，请稍候</p>
+                </div>
+            `;
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/generate-recommendations?count=20`, {
+                    method: 'POST',
+                    headers: getAuthHeaders()
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok) {
+                    alert(`成功！${data.message}`);
+                    loadCurrentRecommendations();
+                } else {
+                    alert('生成失败: ' + (data.detail || '未知错误'));
+                    loadCurrentRecommendations();
+                }
+            } catch (e) {
+                console.error('生成推荐片段失败:', e);
+                alert('网络错误，请稍后重试');
+                loadCurrentRecommendations();
+            }
         }
 
         // 动画片树形管理
@@ -1175,22 +1334,32 @@
                 
                 <div class="card" style="margin-bottom: 20px; background: #FEF3C7; border-color: #F59E0B;">
                     <p style="margin: 0; color: #92400E;">
-                        💡 <strong>提示：</strong>集和配音片段信息从 all.json 动态获取，不需要在后台手动添加。
-                        只需为每季配置正确的 <code>all.json URL</code> 即可。
+                        💡 <strong>提示：</strong>勾选"上首页"后，该动画片会显示在App首页的热门动画中。拖拽或使用上下按钮调整顺序。
                     </p>
                 </div>
 
-                <div class="tree-container">
+                <div class="tree-container" id="cartoons-sortable">
                     ${cartoons.length === 0 ? '<div class="empty-state"><div class="icon">🎬</div><p>还没有动画片，点击上方按钮添加</p></div>' : ''}
-                    ${cartoons.map(cartoon => {
+                    ${cartoons.map((cartoon, index) => {
                         const cartoonSeasons = seasons.filter(s => s.cartoon_id === cartoon.id).sort((a, b) => a.number - b.number);
                         return `
-                            <div class="tree-item" data-id="${cartoon.id}">
+                            <div class="tree-item" data-id="${cartoon.id}" data-sort="${cartoon.sort_order || 0}" data-featured="${cartoon.is_featured ? '1' : '0'}">
                                 <div class="tree-header" onclick="toggleTree(this)">
+                                    <div class="sort-controls" onclick="event.stopPropagation()">
+                                        <button class="btn-sort" onclick="moveCartoon('${cartoon.id}', -1)" title="上移">▲</button>
+                                        <button class="btn-sort" onclick="moveCartoon('${cartoon.id}', 1)" title="下移">▼</button>
+                                    </div>
+                                    <label class="featured-checkbox" onclick="event.stopPropagation()" title="勾选后显示在首页">
+                                        <input type="checkbox" ${cartoon.is_featured ? 'checked' : ''} onchange="toggleFeatured('${cartoon.id}', this.checked)">
+                                        <span>首页</span>
+                                    </label>
                                     <div class="tree-toggle ${cartoonSeasons.length > 0 ? '' : 'hidden'}">▶</div>
                                     <img class="thumbnail" src="${cartoon.thumbnail || 'https://via.placeholder.com/60x40'}" alt="">
                                     <div class="tree-info">
-                                        <div class="tree-title">${cartoon.name_cn}</div>
+                                        <div class="tree-title">
+                                            ${cartoon.name_cn}
+                                            ${cartoon.is_featured ? '<span class="badge badge-warning" style="margin-left: 8px;">首页推荐</span>' : ''}
+                                        </div>
                                         <div class="tree-subtitle">${cartoon.name} · ${cartoonSeasons.length}季 · <span class="badge ${cartoon.is_active ? 'badge-success' : 'badge-danger'}">${cartoon.is_active ? '启用' : '禁用'}</span></div>
                                     </div>
                                     <div class="tree-actions" onclick="event.stopPropagation()">
@@ -1227,6 +1396,75 @@
                     }).join('')}
                 </div>
             `;
+        }
+        
+        // 移动动画片排序
+        async function moveCartoon(id, direction) {
+            const container = document.getElementById('cartoons-sortable');
+            const items = Array.from(container.querySelectorAll('.tree-item'));
+            const currentIndex = items.findIndex(item => item.dataset.id === id);
+            
+            if (currentIndex === -1) return;
+            
+            const newIndex = currentIndex + direction;
+            if (newIndex < 0 || newIndex >= items.length) return;
+            
+            // 交换DOM位置
+            const currentItem = items[currentIndex];
+            const targetItem = items[newIndex];
+            
+            if (direction < 0) {
+                container.insertBefore(currentItem, targetItem);
+            } else {
+                container.insertBefore(targetItem, currentItem);
+            }
+            
+            // 保存排序
+            await saveCartoonsOrder();
+        }
+        
+        // 切换首页显示
+        async function toggleFeatured(id, checked) {
+            const item = document.querySelector(`.tree-item[data-id="${id}"]`);
+            if (item) {
+                item.dataset.featured = checked ? '1' : '0';
+            }
+            await saveCartoonsOrder();
+            // 重新加载以更新UI显示
+            loadCartoonsTree();
+        }
+        
+        // 保存排序和首页状态
+        async function saveCartoonsOrder() {
+            const container = document.getElementById('cartoons-sortable');
+            const items = Array.from(container.querySelectorAll('.tree-item'));
+            
+            const orders = items.map((item, index) => ({
+                id: item.dataset.id,
+                sort_order: index,
+                is_featured: item.dataset.featured === '1'
+            }));
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/cartoons/update-order`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify(orders)
+                });
+                
+                if (!res.ok) {
+                    throw new Error('保存失败');
+                }
+                
+                // 更新本地数据
+                await loadAllData();
+            } catch (e) {
+                console.error('保存排序失败:', e);
+                alert('保存排序失败，请刷新页面重试');
+            }
         }
 
         // 切换树形展开/折叠

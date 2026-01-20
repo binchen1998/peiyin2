@@ -35,6 +35,19 @@ export interface DubbingClip {
   duration: number;
 }
 
+// 首页推荐片段
+export interface RecommendedClip {
+  id: number;
+  seasonId: string;
+  episodeName: string;
+  clipPath: string;
+  videoUrl: string;
+  thumbnail: string | null;
+  originalText: string;
+  translationCN: string | null;
+  duration: number;
+}
+
 // 评分结果
 export interface ScoringResult {
   overallScore: number;

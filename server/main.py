@@ -1,6 +1,6 @@
 """
 英语配音评分服务
-使用 FastAPI + Vosk 实现音素级对齐和评分
+使用 FastAPI + 远程 Vosk 服务实现音素级对齐和评分
 """
 
 import os
@@ -21,6 +21,7 @@ from scoring import VoskScorer, ScoringResult
 from database import init_db, get_db, init_sample_data, DubbingRecord
 from admin_routes import router as admin_router
 from app_routes import router as app_router
+from worker import start_worker, stop_worker
 
 # 添加 httpx 到依赖（用于 app_routes 中的远程 JSON 请求）
 
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 # 创建 FastAPI 应用
 app = FastAPI(
     title="英语配音评分服务",
-    description="使用 Vosk 进行音素级对齐和评分的 API 服务",
+    description="使用远程 Vosk 服务进行音素级对齐和评分的 API 服务",
     version="1.0.0"
 )
 
@@ -73,14 +74,24 @@ async def startup_event():
     init_sample_data(db)
     db.close()
     
-    # 初始化 Vosk 评分器
+    # 初始化 Vosk 评分器（使用远程服务 vosk.coding61.com）
     try:
-        model_path = os.environ.get("VOSK_MODEL_PATH", "model")
-        scorer = VoskScorer(model_path)
-        logger.info("Vosk 评分器初始化成功")
+        scorer = VoskScorer()
+        logger.info("Vosk 评分器初始化成功（远程服务）")
     except Exception as e:
         logger.error(f"Vosk 评分器初始化失败: {e}")
         logger.info("将使用模拟评分模式")
+    
+    # 启动后台 Worker（每小时生成推荐片段）
+    start_worker()
+    logger.info("后台 Worker 已启动")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """应用关闭时清理"""
+    stop_worker()
+    logger.info("后台 Worker 已停止")
 
 @app.get("/")
 async def root():
@@ -120,6 +131,50 @@ class ScoreResponse(BaseModel):
     phonemeScores: list
     wordScores: list
     feedback: str
+
+
+class SaveScoreRequest(BaseModel):
+    """保存评分请求模型"""
+    user_id: str
+    clip_path: str
+    season_id: Optional[str] = None
+    score: int
+    feedback: str
+    word_scores: list
+
+
+@app.post("/api/save-score")
+async def save_score(
+    request: SaveScoreRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    保存评分记录（客户端直接调用 Vosk 后，将结果保存到后端）
+    
+    Args:
+        request: 评分结果数据
+    
+    Returns:
+        保存状态
+    """
+    logger.info(f"保存评分记录: user_id={request.user_id}, clip_path={request.clip_path}, score={request.score}")
+    
+    try:
+        record = DubbingRecord(
+            clip_path=request.clip_path,
+            season_id=request.season_id,
+            user_id=request.user_id,
+            score=request.score,
+            feedback=request.feedback,
+            word_scores=json.dumps(request.word_scores)
+        )
+        db.add(record)
+        db.commit()
+        
+        return {"status": "ok", "message": "评分记录已保存"}
+    except Exception as e:
+        logger.error(f"保存评分记录失败: {e}")
+        return {"status": "error", "message": str(e)}
 
 
 @app.post("/api/score", response_model=ScoreResponse)

@@ -9,37 +9,33 @@ import os
 import sys
 import re
 import json
+import shutil
 import subprocess
 import argparse
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
-from dotenv import load_dotenv
-
-# 获取脚本所在目录
-SCRIPT_DIR = Path(__file__).parent.resolve()
-ENV_FILE = SCRIPT_DIR / ".env"
-
-# 检查 .env 文件是否存在
-if not ENV_FILE.exists():
-    print(f"错误: 找不到 .env 文件: {ENV_FILE}")
-    print("请在脚本所在目录创建 .env 文件，并添加 OPENAI_API_KEY=your_api_key")
-    sys.exit(1)
-
-# 加载 .env 文件
-load_dotenv(ENV_FILE)
-
-# 检查 API Key 是否存在
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    print("错误: .env 文件中未设置 OPENAI_API_KEY")
-    print("请在 .env 文件中添加: OPENAI_API_KEY=your_api_key")
-    sys.exit(1)
 
 # 配置
 WHISPER_EXE = r"D:\Faster-Whisper-XXL_r192.3.3_windows\Faster-Whisper-XXL\faster-whisper-xxl.exe"
 FFMPEG_EXE = "ffmpeg"  # 假设 ffmpeg 在 PATH 中，如果不在请修改为完整路径
+
+# 从 .env 文件读取 API Key
+OPENAI_API_KEY = None
+env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+if os.path.exists(env_path):
+    with open(env_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith('OPENAI_API_KEY='):
+                OPENAI_API_KEY = line.split('=', 1)[1].strip().strip('"').strip("'")
+                break
+
+# 也尝试从环境变量读取
+if not OPENAI_API_KEY:
+    OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 
 
 def file_exists_and_not_empty(filepath: str) -> bool:
@@ -47,9 +43,9 @@ def file_exists_and_not_empty(filepath: str) -> bool:
     检查文件是否存在且内容不为空
     用于跳过已生成的文件，支持断点续传
     """
-    if os.path.exists(filepath) and os.path.isfile(filepath):
-        return os.path.getsize(filepath) > 0
-    return False
+    if not os.path.exists(filepath):
+        return False
+    return os.path.getsize(filepath) > 0
 
 
 def sanitize_filename(filename: str) -> str:
@@ -140,7 +136,9 @@ def parse_srt_file(srt_path: str) -> List[SRTSubtitle]:
 
 
 def extract_subtitles(video_path: str, output_dir: str) -> str:
-    """使用 faster-whisper-xxl 提取字幕"""
+    """使用 faster-whisper-xxl 提取字幕，或使用已存在的字幕文件"""
+    print(f"正在提取字幕: {video_path}")
+    
     video_name = Path(video_path).stem
     # 清理文件名中的多余空格
     video_name_cleaned = sanitize_filename(video_name)
@@ -148,32 +146,36 @@ def extract_subtitles(video_path: str, output_dir: str) -> str:
     # 确保路径使用绝对路径，避免空格问题
     video_path = os.path.abspath(video_path)
     output_dir = os.path.abspath(output_dir)
+    video_dir = os.path.dirname(video_path)
     
-    # 检查 SRT 文件是否已存在 - 尝试多种可能的文件名
+    # 首先检查视频目录或输出目录中是否已经存在 srt 文件
     possible_names = [
         f"{video_name}.srt",           # 原始文件名
         f"{video_name_cleaned}.srt",   # 清理后的文件名
     ]
     
+    # 检查视频目录
     for name in possible_names:
-        srt_path = os.path.join(output_dir, name)
-        if file_exists_and_not_empty(srt_path):
-            print(f"字幕文件已存在，跳过提取: {srt_path}")
+        srt_path = os.path.join(video_dir, name)
+        if os.path.exists(srt_path) and os.path.getsize(srt_path) > 0:
+            print(f"发现已存在的字幕文件: {srt_path}")
+            # 如果不在输出目录，复制一份到输出目录
+            target_path = os.path.join(output_dir, name)
+            if srt_path != target_path:
+                os.makedirs(output_dir, exist_ok=True)
+                shutil.copy2(srt_path, target_path)
+                print(f"已复制到: {target_path}")
+                return target_path
             return srt_path
     
-    # 尝试查找任何已存在的 SRT 文件
-    if os.path.exists(output_dir):
-        for file in os.listdir(output_dir):
-            if file.lower().endswith('.srt'):
-                srt_path = os.path.join(output_dir, file)
-                if file_exists_and_not_empty(srt_path):
-                    print(f"字幕文件已存在，跳过提取: {srt_path}")
-                    return srt_path
+    # 检查输出目录
+    for name in possible_names:
+        srt_path = os.path.join(output_dir, name)
+        if os.path.exists(srt_path) and os.path.getsize(srt_path) > 0:
+            print(f"发现已存在的字幕文件: {srt_path}")
+            return srt_path
     
-    # 字幕文件不存在，开始提取
-    print(f"正在提取字幕: {video_path}")
-    
-    # 运行 faster-whisper-xxl
+    # 没有找到现有字幕文件，运行 faster-whisper-xxl
     # 注意：使用列表形式传递参数，subprocess 会自动处理空格
     cmd = [
         WHISPER_EXE,
@@ -191,7 +193,12 @@ def extract_subtitles(video_path: str, output_dir: str) -> str:
         print(f"运行 faster-whisper-xxl 出错: {e}")
         return None
     
-    # 查找生成的 SRT 文件
+    # 查找生成的 SRT 文件 - 尝试多种可能的文件名
+    possible_names = [
+        f"{video_name}.srt",           # 原始文件名
+        f"{video_name_cleaned}.srt",   # 清理后的文件名
+    ]
+    
     for name in possible_names:
         srt_path = os.path.join(output_dir, name)
         if os.path.exists(srt_path):
@@ -256,23 +263,29 @@ SRT字幕内容:
         return []
 
 
-def translate_text_with_chatgpt(texts: List[str], api_key: str) -> Dict[str, str]:
+def translate_all_with_chatgpt(texts: List[str], video_title: str, api_key: str) -> Tuple[Dict[str, str], str]:
     """
-    使用 ChatGPT 翻译文本
-    返回原文到译文的映射
+    使用 ChatGPT 一次性翻译所有文本（包括字幕和视频标题）
+    返回: (字幕翻译字典, 标题翻译)
     """
-    print("正在翻译字幕...")
+    print("正在翻译字幕和标题...")
     
     client = OpenAI(api_key=api_key)
     
     texts_json = json.dumps(texts, ensure_ascii=False)
     
-    prompt = f"""请将以下英文句子翻译成中文，适合儿童阅读。
-返回JSON格式，key是原文，value是翻译：
+    prompt = f"""请翻译以下内容为中文，适合儿童阅读。
 
+1. 视频标题: {video_title}
+
+2. 字幕内容:
 {texts_json}
 
-返回格式：{{"translations": {{"English text": "中文翻译", ...}}}}
+返回JSON格式：
+{{
+    "title": "视频标题的中文翻译",
+    "subtitles": {{"English text": "中文翻译", ...}}
+}}
 """
     
     try:
@@ -287,30 +300,14 @@ def translate_text_with_chatgpt(texts: List[str], api_key: str) -> Dict[str, str
         )
         
         result = json.loads(response.choices[0].message.content)
-        translations = result.get("translations", {})
-        return translations
+        translations = result.get("subtitles", {})
+        title_cn = result.get("title", video_title)
+        print(f"翻译完成: 标题 + {len(translations)} 条字幕")
+        return translations, title_cn
         
     except Exception as e:
         print(f"翻译出错: {e}")
-        return {}
-
-
-def get_video_title_translation(video_name: str, api_key: str) -> str:
-    """获取视频标题的中文翻译"""
-    client = OpenAI(api_key=api_key)
-    
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "翻译视频标题为中文，只返回翻译结果，不要其他内容。"},
-                {"role": "user", "content": f"翻译这个动画片标题: {video_name}"}
-            ],
-            temperature=0.3
-        )
-        return response.choices[0].message.content.strip()
-    except:
-        return video_name
+        return {}, video_title
 
 
 def extract_video_clip(video_path: str, start_time: float, end_time: float, 
@@ -380,18 +377,6 @@ def process_single_video(video_path: str, output_dir: str, api_key: str,
     # 创建输出目录
     os.makedirs(output_dir, exist_ok=True)
     
-    # 检查 JSON 文件是否已存在，如果存在则跳过所有处理步骤
-    json_path = os.path.join(output_dir, f"{video_name}.json")
-    if file_exists_and_not_empty(json_path):
-        print(f"JSON 文件已存在，跳过此视频: {json_path}")
-        # 读取并返回已有的 JSON 数据
-        try:
-            with open(json_path, 'r', encoding='utf-8') as f:
-                existing_result = json.load(f)
-            return existing_result
-        except Exception as e:
-            print(f"读取已有 JSON 文件失败: {e}，重新处理此视频")
-    
     # 步骤1: 提取字幕
     srt_path = extract_subtitles(video_path, output_dir)
     if not srt_path:
@@ -429,12 +414,9 @@ def process_single_video(video_path: str, output_dir: str, api_key: str,
         print("没有匹配到字幕，跳过此视频")
         return None
     
-    # 翻译字幕
+    # 一次性翻译字幕和标题
     texts_to_translate = [s.text for s in selected_subtitles]
-    translations = translate_text_with_chatgpt(texts_to_translate, api_key)
-    
-    # 获取标题翻译
-    title_cn = get_video_title_translation(video_name, api_key)
+    translations, title_cn = translate_all_with_chatgpt(texts_to_translate, video_name, api_key)
     
     # 步骤4 & 5: 截取视频片段并生成 JSON
     clips = []
@@ -447,62 +429,89 @@ def process_single_video(video_path: str, output_dir: str, api_key: str,
     main_thumbnail = "main.jpg"
     main_thumbnail_path = os.path.join(thumbnails_dir, main_thumbnail)
     if selected_subtitles:
-        if file_exists_and_not_empty(main_thumbnail_path):
-            print(f"主缩略图已存在，跳过: {main_thumbnail}")
-        else:
-            extract_thumbnail(video_path, selected_subtitles[0].get_start_seconds(), 
-                             main_thumbnail_path)
+        extract_thumbnail(video_path, selected_subtitles[0].get_start_seconds(), 
+                         main_thumbnail_path)
     
+    # 准备所有片段的任务数据
+    PADDING_SECONDS = 1.0
+    tasks = []
     for i, subtitle in enumerate(selected_subtitles, 1):
-        # 生成文件名
         clip_filename = f"clip_{i}.mp4"
         thumbnail_filename = f"thumb_{i}.jpg"
-        
         clip_path = os.path.join(clips_dir, clip_filename)
         thumbnail_path = os.path.join(thumbnails_dir, thumbnail_filename)
-        
-        # 截取视频片段（前后各多截1秒，避免开头结尾太突兀）
-        PADDING_SECONDS = 1.0
-        clip_start = max(0, subtitle.get_start_seconds() - PADDING_SECONDS)  # 确保不小于0
+        clip_start = max(0, subtitle.get_start_seconds() - PADDING_SECONDS)
         clip_end = subtitle.get_end_seconds() + PADDING_SECONDS
         
-        # 检查视频片段是否已存在
+        tasks.append({
+            "index": i,
+            "subtitle": subtitle,
+            "clip_filename": clip_filename,
+            "thumbnail_filename": thumbnail_filename,
+            "clip_path": clip_path,
+            "thumbnail_path": thumbnail_path,
+            "clip_start": clip_start,
+            "clip_end": clip_end
+        })
+    
+    def process_clip(task):
+        """处理单个片段的函数"""
+        i = task["index"]
+        subtitle = task["subtitle"]
+        clip_path = task["clip_path"]
+        thumbnail_path = task["thumbnail_path"]
+        clip_start = task["clip_start"]
+        clip_end = task["clip_end"]
+        
+        clip_success = True
+        
+        # 截取视频片段
         if file_exists_and_not_empty(clip_path):
-            print(f"片段 {i}/{len(selected_subtitles)} 已存在，跳过: {clip_filename}")
+            pass  # 已存在，跳过
         else:
-            print(f"处理片段 {i}/{len(selected_subtitles)}: {subtitle.text[:30]}...")
-            success = extract_video_clip(
-                video_path,
-                clip_start,
-                clip_end,
-                clip_path
-            )
-            
-            if not success:
-                print(f"  片段 {i} 截取失败，跳过")
-                continue
+            clip_success = extract_video_clip(video_path, clip_start, clip_end, clip_path)
         
-        # 检查缩略图是否已存在
-        if file_exists_and_not_empty(thumbnail_path):
-            pass  # 缩略图已存在，静默跳过
-        else:
-            extract_thumbnail(
-                video_path,
-                subtitle.get_start_seconds() + 0.5,  # 稍微偏移一点
-                thumbnail_path
-            )
+        # 提取缩略图
+        if not file_exists_and_not_empty(thumbnail_path):
+            extract_thumbnail(video_path, subtitle.get_start_seconds() + 0.5, thumbnail_path)
         
-        # 获取翻译
+        return {
+            "task": task,
+            "success": clip_success
+        }
+    
+    # 并行处理所有片段
+    print(f"正在并行处理 {len(tasks)} 个片段...")
+    results = {}
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(process_clip, task): task["index"] for task in tasks}
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                result = future.result()
+                results[idx] = result
+                status = "完成" if result["success"] else "失败"
+                print(f"  片段 {idx}/{len(tasks)} {status}")
+            except Exception as e:
+                print(f"  片段 {idx}/{len(tasks)} 出错: {e}")
+                results[idx] = {"task": tasks[idx-1], "success": False}
+    
+    # 按顺序生成 clips 数据
+    for task in tasks:
+        i = task["index"]
+        result = results.get(i)
+        if not result or not result["success"]:
+            continue
+        
+        subtitle = task["subtitle"]
         translation = translations.get(subtitle.text, subtitle.text)
-        
-        # 计算实际的视频片段时长
-        actual_duration = round(clip_end - clip_start, 2)
+        actual_duration = round(task["clip_end"] - task["clip_start"], 2)
         
         clip_data = {
-            "video_url": f"clips/{clip_filename}",
+            "video_url": f"clips/{task['clip_filename']}",
             "original_text": subtitle.text,
             "translation_cn": translation,
-            "thumbnail": f"thumbnails/{thumbnail_filename}",
+            "thumbnail": f"thumbnails/{task['thumbnail_filename']}",
             "duration": actual_duration
         }
         clips.append(clip_data)
@@ -528,9 +537,71 @@ def process_single_video(video_path: str, output_dir: str, api_key: str,
     return result
 
 
+def generate_all_json(input_dir: str) -> List[Dict]:
+    """
+    遍历目录下所有子目录，生成 all.json
+    返回所有视频的元数据列表
+    """
+    input_dir = os.path.abspath(input_dir)
+    all_videos = []
+    
+    # 遍历目录下的所有子目录
+    for item in os.listdir(input_dir):
+        item_path = os.path.join(input_dir, item)
+        
+        # 跳过文件，只处理目录
+        if not os.path.isdir(item_path):
+            continue
+        
+        # 查找子目录中的 JSON 文件（排除 summary.json 和 all.json）
+        json_files = [f for f in os.listdir(item_path) 
+                      if f.lower().endswith('.json') 
+                      and f.lower() not in ('summary.json', 'all.json')]
+        
+        if json_files:
+            # 使用第一个找到的 JSON 文件
+            json_path = os.path.join(item_path, json_files[0])
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    video_data = json.load(f)
+                
+                # 使用目录名作为 name（确保一致性）
+                all_videos.append({
+                    "id": len(all_videos),
+                    "name": item  # 使用目录名
+                })
+            except Exception as e:
+                print(f"读取 JSON 文件失败: {json_path}, 错误: {e}")
+    
+    # 按名称排序
+    all_videos.sort(key=lambda x: x["name"])
+    
+    # 重新分配 id
+    for i, video in enumerate(all_videos):
+        video["id"] = i
+    
+    # 保存 all.json
+    all_json_path = os.path.join(input_dir, "all.json")
+    with open(all_json_path, 'w', encoding='utf-8') as f:
+        json.dump(all_videos, f, ensure_ascii=False, indent=2)
+    
+    print(f"已生成 all.json，包含 {len(all_videos)} 个视频目录")
+    
+    return all_videos
+
+
 def process_directory(input_dir: str, api_key: str, clip_count: int = 10, max_retries: int = 5):
     """处理目录下的所有 MP4 文件，最多重试 max_retries 次确保所有文件都处理完成"""
     input_dir = os.path.abspath(input_dir)
+    
+    # 检查目录是否存在
+    if not os.path.exists(input_dir):
+        print(f"错误: 目录不存在: {input_dir}")
+        sys.exit(1)
+    
+    if not os.path.isdir(input_dir):
+        print(f"错误: 路径不是目录: {input_dir}")
+        sys.exit(1)
     
     # 查找所有 MP4 文件
     mp4_files = []
@@ -539,8 +610,8 @@ def process_directory(input_dir: str, api_key: str, clip_count: int = 10, max_re
             mp4_files.append(os.path.join(input_dir, file))
     
     if not mp4_files:
-        print(f"目录 {input_dir} 中没有找到 MP4 文件")
-        return
+        print(f"错误: 目录 {input_dir} 中没有找到 MP4 文件")
+        sys.exit(1)
     
     print(f"找到 {len(mp4_files)} 个 MP4 文件")
     
@@ -587,6 +658,14 @@ def process_directory(input_dir: str, api_key: str, clip_count: int = 10, max_re
             )
             if result:
                 results[info["video_name"]] = result
+            
+            # 如果 JSON 文件已成功生成，删除原始 MP4 文件
+            if file_exists_and_not_empty(info["json_path"]):
+                try:
+                    os.remove(info["video_path"])
+                    print(f"已删除处理完成的 MP4 文件: {info['video_path']}")
+                except Exception as e:
+                    print(f"删除 MP4 文件失败: {info['video_path']}, 错误: {e}")
         
         # 检查本轮处理后的结果
         completed_count = sum(1 for info in video_info if file_exists_and_not_empty(info["json_path"]))
@@ -633,15 +712,25 @@ def process_directory(input_dir: str, api_key: str, clip_count: int = 10, max_re
     with open(summary_path, 'w', encoding='utf-8') as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
     
-    # 生成目录元数据 JSON (all.json) - 用于排序
-    all_meta = [
-        {"id": i, "name": r["title"]}
-        for i, r in enumerate(final_results)
-    ]
-    
+    # 生成目录元数据 JSON (all.json) - 遍历所有子目录生成
+    all_videos = generate_all_json(input_dir)
     all_json_path = os.path.join(input_dir, "all.json")
-    with open(all_json_path, 'w', encoding='utf-8') as f:
-        json.dump(all_meta, f, ensure_ascii=False, indent=2)
+    
+    # 复制第一集的 main.jpg 到 all.json 同目录
+    if all_videos and len(all_videos) > 0:
+        first_video_name = all_videos[0]["name"]
+        first_video_dir = os.path.join(input_dir, first_video_name)
+        first_main_jpg = os.path.join(first_video_dir, "thumbnails", "main.jpg")
+        target_main_jpg = os.path.join(input_dir, "main.jpg")
+        
+        if file_exists_and_not_empty(first_main_jpg):
+            try:
+                shutil.copy2(first_main_jpg, target_main_jpg)
+                print(f"已复制第一集的 main.jpg 到: {target_main_jpg}")
+            except Exception as e:
+                print(f"复制 main.jpg 失败: {e}")
+        else:
+            print(f"警告: 第一集的 main.jpg 不存在: {first_main_jpg}")
     
     print(f"\n{'='*60}")
     print(f"全部处理完成!")

@@ -13,15 +13,18 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from database import (
-    get_db, Cartoon, Season, DubbingRecord, AdminToken,
+    get_db, Cartoon, Season, DubbingRecord, AdminToken, RecommendedClip,
     verify_admin, change_admin_password, AdminUser,
-    create_token, get_token, delete_token, cleanup_expired_tokens
+    create_token, get_token, delete_token, cleanup_expired_tokens,
+    get_recommended_clips
 )
+from worker import generate_recommendations_task
 from schemas import (
     CartoonCreate, CartoonUpdate, CartoonResponse, CartoonListResponse,
     SeasonCreate, SeasonUpdate, SeasonResponse, SeasonListResponse,
     DubbingRecordResponse, StatsResponse
 )
+import math
 
 router = APIRouter(prefix="/admin", tags=["后台管理"])
 
@@ -149,26 +152,48 @@ def get_stats(db: Session = Depends(get_db)):
 
 
 # ===== 动画片管理 =====
-@router.get("/cartoons", response_model=List[CartoonListResponse])
+@router.get("/cartoons")
 def list_cartoons(
-    skip: int = 0,
-    limit: int = 100,
+    page: int = 1,
+    page_size: int = 20,
     db: Session = Depends(get_db)
 ):
-    """获取动画片列表"""
-    cartoons = db.query(Cartoon).offset(skip).limit(limit).all()
-    result = []
+    """
+    获取动画片列表（按 sort_order 排序）
+    page: 页码，从1开始
+    page_size: 每页数量
+    """
+    query = db.query(Cartoon)
+    
+    # 获取总数
+    total = query.count()
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+    
+    # 分页
+    offset = (page - 1) * page_size
+    cartoons = query.order_by(Cartoon.sort_order, Cartoon.id).offset(offset).limit(page_size).all()
+    
+    items = []
     for cartoon in cartoons:
         season_count = db.query(Season).filter(Season.cartoon_id == cartoon.id).count()
-        result.append(CartoonListResponse(
+        items.append(CartoonListResponse(
             id=cartoon.id,
             name=cartoon.name,
             name_cn=cartoon.name_cn,
             thumbnail=cartoon.thumbnail,
             is_active=cartoon.is_active,
+            is_featured=cartoon.is_featured,
+            sort_order=cartoon.sort_order,
             season_count=season_count
         ))
-    return result
+    
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
 
 
 @router.get("/cartoons/{cartoon_id}", response_model=CartoonResponse)
@@ -227,28 +252,73 @@ def delete_cartoon(cartoon_id: str, db: Session = Depends(get_db)):
     return {"message": "删除成功"}
 
 
-# ===== 季管理 =====
-@router.get("/seasons", response_model=List[SeasonListResponse])
-def list_seasons(
-    cartoon_id: Optional[str] = None,
+@router.post("/cartoons/update-order")
+def update_cartoons_order(
+    orders: List[dict],
     db: Session = Depends(get_db)
 ):
-    """获取季列表"""
+    """
+    批量更新动画片排序和首页显示状态
+    orders: [{"id": "xxx", "sort_order": 0, "is_featured": true}, ...]
+    """
+    for item in orders:
+        cartoon_id = item.get("id")
+        if not cartoon_id:
+            continue
+        
+        db_cartoon = db.query(Cartoon).filter(Cartoon.id == cartoon_id).first()
+        if db_cartoon:
+            if "sort_order" in item:
+                db_cartoon.sort_order = item["sort_order"]
+            if "is_featured" in item:
+                db_cartoon.is_featured = item["is_featured"]
+    
+    db.commit()
+    return {"message": "更新成功"}
+
+
+# ===== 季管理 =====
+@router.get("/seasons")
+def list_seasons(
+    cartoon_id: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db)
+):
+    """
+    获取季列表
+    page: 页码，从1开始
+    page_size: 每页数量
+    """
     query = db.query(Season)
     if cartoon_id:
         query = query.filter(Season.cartoon_id == cartoon_id)
     
-    seasons = query.order_by(Season.number).all()
-    result = []
+    # 获取总数
+    total = query.count()
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+    
+    # 分页
+    offset = (page - 1) * page_size
+    seasons = query.order_by(Season.number).offset(offset).limit(page_size).all()
+    
+    items = []
     for season in seasons:
-        result.append(SeasonListResponse(
+        items.append(SeasonListResponse(
             id=season.id,
             cartoon_id=season.cartoon_id,
             number=season.number,
             all_json_url=season.all_json_url,
             is_active=season.is_active
         ))
-    return result
+    
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
 
 
 @router.post("/seasons", response_model=SeasonResponse)
@@ -304,19 +374,49 @@ def delete_season(season_id: str, db: Session = Depends(get_db)):
 
 
 # ===== 配音记录 =====
-@router.get("/records", response_model=List[DubbingRecordResponse])
+@router.get("/records")
 def list_records(
     clip_path: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 100,
+    page: int = 1,
+    page_size: int = 20,
     db: Session = Depends(get_db)
 ):
-    """获取配音记录列表"""
+    """
+    获取配音记录列表
+    page: 页码，从1开始
+    page_size: 每页数量
+    """
     query = db.query(DubbingRecord)
     if clip_path:
         query = query.filter(DubbingRecord.clip_path == clip_path)
     
-    return query.order_by(DubbingRecord.created_at.desc()).offset(skip).limit(limit).all()
+    # 获取总数
+    total = query.count()
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+    
+    # 分页
+    offset = (page - 1) * page_size
+    records = query.order_by(DubbingRecord.created_at.desc()).offset(offset).limit(page_size).all()
+    
+    items = [
+        DubbingRecordResponse(
+            id=r.id,
+            clip_path=r.clip_path,
+            user_id=r.user_id,
+            score=r.score,
+            feedback=r.feedback,
+            created_at=r.created_at
+        )
+        for r in records
+    ]
+    
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
 
 
 @router.delete("/records/{record_id}")
@@ -458,3 +558,65 @@ async def import_data(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
+
+
+# ===== 推荐片段管理 =====
+@router.post("/generate-recommendations")
+async def generate_recommendations(count: int = 20):
+    """
+    手动生成推荐片段
+    从所有启用的季中随机选择指定数量的片段
+    """
+    result = await generate_recommendations_task(count)
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "生成失败"))
+    
+    return {
+        "message": result.get("message"),
+        "count": result.get("count", 0),
+        "total_available": result.get("total_available", 0)
+    }
+
+
+@router.get("/recommendations")
+def get_admin_recommendations(
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db)
+):
+    """
+    获取当前的推荐片段列表
+    page: 页码，从1开始
+    page_size: 每页数量
+    """
+    all_clips = get_recommended_clips(db)
+    total = len(all_clips)
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+    
+    # 分页
+    offset = (page - 1) * page_size
+    paged_clips = all_clips[offset:offset + page_size]
+    
+    items = [
+        {
+            "id": c.id,
+            "seasonId": c.season_id,
+            "episodeName": c.episode_name,
+            "clipPath": c.clip_path,
+            "videoUrl": c.video_url,
+            "thumbnail": c.thumbnail,
+            "originalText": c.original_text,
+            "translationCN": c.translation_cn,
+            "duration": c.duration
+        }
+        for c in paged_clips
+    ]
+    
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }

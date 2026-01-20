@@ -11,10 +11,10 @@ pymysql==1.1.0  # MySQL support (optional)
 # 环境变量
 python-dotenv==1.0.0
 
-# 语音处理
-vosk==0.3.45
-pydub==0.25.1
-soundfile==0.12.1
+# 语音处理（通过远程 Vosk 服务）
+# vosk==0.3.45  # 已改用远程服务 vosk.coding61.com
+# pydub==0.25.1  # 远程服务处理音频转换
+# soundfile==0.12.1  # 远程服务处理音频
 
 # 其他工具
 numpy==1.26.3

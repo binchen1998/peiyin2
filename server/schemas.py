@@ -3,8 +3,20 @@ Pydantic 数据模式定义
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Generic, TypeVar
 from pydantic import BaseModel
+
+# 泛型类型变量，用于分页响应
+T = TypeVar('T')
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    """通用分页响应"""
+    items: List[T]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
 # ===== 动画片 =====
@@ -26,6 +38,8 @@ class CartoonUpdate(BaseModel):
     thumbnail: Optional[str] = None
     description: Optional[str] = None
     is_active: Optional[bool] = None
+    is_featured: Optional[bool] = None
+    sort_order: Optional[int] = None
 
 
 class CartoonResponse(CartoonBase):
@@ -43,6 +57,8 @@ class CartoonListResponse(BaseModel):
     name_cn: str
     thumbnail: Optional[str]
     is_active: bool
+    is_featured: bool = False
+    sort_order: int = 0
     season_count: int = 0
     
     class Config:
@@ -183,6 +199,22 @@ class AppDubbingClipResponse(BaseModel):
     originalText: str
     translationCN: Optional[str]
     thumbnail: Optional[str]
+    duration: float
+    
+    class Config:
+        from_attributes = True
+
+
+class AppRecommendedClipResponse(BaseModel):
+    """首页推荐片段"""
+    id: int
+    seasonId: str
+    episodeName: str
+    clipPath: str
+    videoUrl: str
+    thumbnail: Optional[str]
+    originalText: str
+    translationCN: Optional[str]
     duration: float
     
     class Config:

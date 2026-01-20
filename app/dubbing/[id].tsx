@@ -11,7 +11,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { fetchClipByPath } from '@/data/mock-data';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ScoringResult, DubbingClip, WordScore } from '@/types';
-import { API_BASE_URL, API_ENDPOINTS } from '@/config/api';
+import { API_BASE_URL, API_ENDPOINTS, VOSK_SERVICE_URL } from '@/config/api';
 import { getUserId } from '@/hooks/use-user-profile';
 
 const { width } = Dimensions.get('window');
@@ -515,36 +515,38 @@ export default function DubbingScreen() {
 
     try {
       const userId = await getUserId();
-      const formData = new FormData();
       
-      // 添加音频文件
+      // 1. 直接调用 Vosk 评分服务
+      const voskFormData = new FormData();
       const audioFile = {
         uri: recordingUri,
         type: 'audio/m4a',
         name: 'recording.m4a',
       } as any;
-      formData.append('audio', audioFile);
-      formData.append('text', clip.originalText);
-      formData.append('clip_path', clipPath);
-      formData.append('user_id', userId);
-      if (seasonId) {
-        formData.append('season_id', seasonId);
-      }
+      voskFormData.append('audio', audioFile);
+      voskFormData.append('text', clip.originalText);
 
-      const response = await fetch(`${API_BASE_URL}/api/score`, {
+      console.log('正在调用 Vosk 服务:', API_ENDPOINTS.voskScore);
+      const voskResponse = await fetch(API_ENDPOINTS.voskScore, {
         method: 'POST',
-        body: formData,
+        body: voskFormData,
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       });
 
-      if (!response.ok) {
-        throw new Error('评分请求失败');
+      if (!voskResponse.ok) {
+        throw new Error(`Vosk 评分失败: ${voskResponse.status}`);
       }
 
-      const result: ScoringResult = await response.json();
-      console.log('服务器返回的评分结果:', JSON.stringify(result, null, 2));
+      const result: ScoringResult = await voskResponse.json();
+      console.log('Vosk 服务返回的评分结果:', JSON.stringify(result, null, 2));
+      
+      // 2. 将评分结果保存到后端（异步，不阻塞用户体验）
+      saveScoreToBackend(userId, clipPath, seasonId, result).catch(err => {
+        console.error('保存评分记录失败:', err);
+      });
+
       setScoringResult(result);
       setRecordingStatus('scored');
       setShowScoreModal(true);
@@ -567,6 +569,37 @@ export default function DubbingScreen() {
       setScoringResult(mockResult);
       setRecordingStatus('scored');
       setShowScoreModal(true);
+    }
+  };
+
+  // 将评分结果保存到后端
+  const saveScoreToBackend = async (
+    userId: string, 
+    clipPath: string, 
+    seasonId: string | undefined, 
+    result: ScoringResult
+  ) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/save-score`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          clip_path: clipPath,
+          season_id: seasonId,
+          score: result.overallScore,
+          feedback: result.feedback,
+          word_scores: result.wordScores,
+        }),
+      });
+      
+      if (!response.ok) {
+        console.warn('保存评分记录返回非 200:', response.status);
+      }
+    } catch (err) {
+      console.error('保存评分记录网络错误:', err);
     }
   };
 

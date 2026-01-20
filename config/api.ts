@@ -19,9 +19,15 @@ const getBaseUrl = () => {
 
 export const API_BASE_URL = getBaseUrl();
 
+// Vosk 语音评分服务（独立服务，客户端直接调用）
+export const VOSK_SERVICE_URL = 'https://vosk.coding61.com';
+
 // API 端点
 export const API_ENDPOINTS = {
-  // 评分
+  // Vosk 评分（直接调用独立服务）
+  voskScore: `${VOSK_SERVICE_URL}/score`,
+  
+  // 后端评分（保留，用于记录评分历史）
   score: `${API_BASE_URL}/api/score`,
   health: `${API_BASE_URL}/health`,
   
@@ -34,6 +40,9 @@ export const API_ENDPOINTS = {
     `${API_BASE_URL}/api/app/seasons/${seasonId}/episodes/${encodeURIComponent(episodeName)}`,
   clips: (seasonId: string, episodeName: string) => 
     `${API_BASE_URL}/api/app/seasons/${seasonId}/episodes/${encodeURIComponent(episodeName)}/clips`,
+  
+  // 推荐片段
+  recommendations: `${API_BASE_URL}/api/app/recommendations`,
   
   // 用户相关
   userStats: (userId: string) => `${API_BASE_URL}/api/app/user/${userId}/stats`,
