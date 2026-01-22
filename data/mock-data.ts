@@ -6,12 +6,21 @@ import { API_ENDPOINTS } from '@/config/api';
 
 // ===== API 调用函数 =====
 
+// 辅助函数：从分页响应中提取数组
+const extractItems = (data: any): any[] => {
+  // 服务器可能返回 { items: [...], total, page, ... } 或直接返回数组
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.items)) return data.items;
+  return [];
+};
+
 // 获取动画片列表
 export const fetchCartoons = async (): Promise<Cartoon[]> => {
   try {
     const response = await fetch(API_ENDPOINTS.cartoons);
     if (!response.ok) throw new Error('获取动画片列表失败');
-    return await response.json();
+    const data = await response.json();
+    return extractItems(data);
   } catch (error) {
     console.error('fetchCartoons error:', error);
     return [];
@@ -35,7 +44,8 @@ export const fetchSeasons = async (cartoonId: string): Promise<Season[]> => {
   try {
     const response = await fetch(API_ENDPOINTS.seasons(cartoonId));
     if (!response.ok) throw new Error('获取季列表失败');
-    return await response.json();
+    const data = await response.json();
+    return extractItems(data);
   } catch (error) {
     console.error('fetchSeasons error:', error);
     return [];
@@ -47,7 +57,8 @@ export const fetchEpisodes = async (seasonId: string): Promise<Episode[]> => {
   try {
     const response = await fetch(API_ENDPOINTS.episodes(seasonId));
     if (!response.ok) throw new Error('获取集列表失败');
-    return await response.json();
+    const data = await response.json();
+    return extractItems(data);
   } catch (error) {
     console.error('fetchEpisodes error:', error);
     return [];
@@ -59,7 +70,8 @@ export const fetchClips = async (seasonId: string, episodeName: string): Promise
   try {
     const response = await fetch(API_ENDPOINTS.clips(seasonId, episodeName));
     if (!response.ok) throw new Error('获取配音片段失败');
-    return await response.json();
+    const data = await response.json();
+    return extractItems(data);
   } catch (error) {
     console.error('fetchClips error:', error);
     return [];

@@ -43,7 +43,9 @@ export default function RecordsScreen() {
       const response = await fetch(API_ENDPOINTS.userRecords(userId));
       if (response.ok) {
         const data = await response.json();
-        setRecords(data);
+        // 服务器可能返回 { items: [...] } 或直接数组
+        const items = data.items || data;
+        setRecords(Array.isArray(items) ? items : []);
       } else {
         setError('加载失败');
       }

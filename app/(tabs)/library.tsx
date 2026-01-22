@@ -41,7 +41,9 @@ export default function LibraryScreen() {
       const response = await fetch(`${API_BASE_URL}/api/app/cartoons`);
       if (response.ok) {
         const data = await response.json();
-        const formattedCartoons: Cartoon[] = data.map((item: any) => ({
+        // 服务器返回 { items: [...], total, page, ... } 格式
+        const items = data.items || data;
+        const formattedCartoons: Cartoon[] = (Array.isArray(items) ? items : []).map((item: any) => ({
           id: item.id,
           name: item.name,
           nameCN: item.nameCN,

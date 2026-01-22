@@ -8,13 +8,13 @@ import { Platform } from 'react-native';
 // Mac: 在终端运行 ifconfig 或在系统设置中查看
 const LOCAL_IP = '192.168.0.100'; // 修改为你的电脑IP
 
+// 生产服务器地址
+const PROD_SERVER = 'http://139.198.19.186:31041';
+
 // 根据平台选择合适的地址
 const getBaseUrl = () => {
-  if (__DEV__) {
-    return `http://${LOCAL_IP}:8000`;
-  }
-  // 生产环境 - 替换为实际的服务器地址
-  return 'https://your-production-server.com';
+  // 使用远程服务器
+  return PROD_SERVER;
 };
 
 export const API_BASE_URL = getBaseUrl();

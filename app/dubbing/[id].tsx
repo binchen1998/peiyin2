@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
-import { StyleSheet, View, Pressable, Dimensions, ActivityIndicator, Platform, Modal, ScrollView, PanResponder, GestureResponderEvent } from 'react-native';
+import { StyleSheet, View, Pressable, Dimensions, ActivityIndicator, Platform, Modal, ScrollView, PanResponder, GestureResponderEvent, Alert, Linking } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -140,6 +142,9 @@ export default function DubbingScreen() {
   const [compositeError, setCompositeError] = useState<string | null>(null);
   const [showCompositeModal, setShowCompositeModal] = useState(false);
   const compositePollingRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // 下载状态
+  const [downloading, setDownloading] = useState(false);
 
   // 进度条宽度
   const progressBarWidth = width - 32;
@@ -225,7 +230,9 @@ export default function DubbingScreen() {
       const response = await fetch(API_ENDPOINTS.clipRecords(userId, clipPath));
       if (response.ok) {
         const data = await response.json();
-        setScoreHistory(data);
+        // 服务器可能返回 { items: [...] } 或直接数组
+        const items = data.items || data;
+        setScoreHistory(Array.isArray(items) ? items : []);
       }
     } catch (err) {
       console.error('加载评分历史失败:', err);
@@ -766,13 +773,24 @@ export default function DubbingScreen() {
 
   // 上传录音并提交合成任务
   const submitCompositeVideo = async () => {
-    if (!recordingUri || !clip) return;
+    if (!recordingUri || !clip) {
+      console.log('submitCompositeVideo: recordingUri或clip为空', { recordingUri, clip });
+      return;
+    }
 
     setCompositeStatus('uploading');
     setCompositeError(null);
 
     try {
       const userId = await getUserId();
+      
+      console.log('===== 提交合成任务 =====');
+      console.log('recordingUri:', recordingUri);
+      console.log('video_url:', clip.videoUrl);
+      console.log('clip_path:', clipPath);
+      console.log('user_id:', userId);
+      console.log('season_id:', seasonId);
+      console.log('API URL:', API_ENDPOINTS.compositeVideo);
       
       // 创建 FormData
       const formData = new FormData();
@@ -791,20 +809,22 @@ export default function DubbingScreen() {
       if (clip.thumbnail) formData.append('thumbnail', clip.thumbnail);
       formData.append('duration', String(clip.duration || 0));
 
-      console.log('提交合成任务:', API_ENDPOINTS.compositeVideo);
+      console.log('发送请求...');
+      // 注意：不要手动设置 Content-Type，让 fetch 自动设置正确的 boundary
       const response = await fetch(API_ENDPOINTS.compositeVideo, {
         method: 'POST',
         body: formData,
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
       });
 
+      console.log('响应状态:', response.status);
+      const responseText = await response.text();
+      console.log('响应内容:', responseText);
+
       if (!response.ok) {
-        throw new Error(`提交失败: ${response.status}`);
+        throw new Error(`提交失败: ${response.status} - ${responseText}`);
       }
 
-      const result: CompositeVideoResponse = await response.json();
+      const result: CompositeVideoResponse = JSON.parse(responseText);
       console.log('合成任务创建成功:', result);
       
       setCompositeTaskId(result.task_id);
@@ -815,7 +835,7 @@ export default function DubbingScreen() {
       
     } catch (err) {
       console.error('提交合成任务失败:', err);
-      setCompositeError('提交失败，请重试');
+      setCompositeError(`提交失败: ${err}`);
       setCompositeStatus('recorded');
     }
   };
@@ -873,6 +893,44 @@ export default function DubbingScreen() {
       }
     };
   }, []);
+
+  // 下载合成视频
+  const handleDownloadVideo = async () => {
+    if (!compositeVideoPath) return;
+
+    try {
+      // 请求媒体库权限
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('权限不足', '需要存储权限才能下载视频');
+        return;
+      }
+
+      setDownloading(true);
+
+      const videoUrl = `${API_BASE_URL}${compositeVideoPath}`;
+      const fileName = `dubbing_${Date.now()}.mp4`;
+      const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+
+      // 下载文件
+      const downloadResult = await FileSystem.downloadAsync(videoUrl, fileUri);
+      
+      if (downloadResult.status !== 200) {
+        throw new Error('下载失败');
+      }
+
+      // 保存到相册
+      const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
+      await MediaLibrary.createAlbumAsync('配音练习', asset, false);
+
+      Alert.alert('下载成功', '视频已保存到相册');
+    } catch (err) {
+      console.error('下载失败:', err);
+      Alert.alert('下载失败', '请重试');
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   // 加载中状态
   if (loading) {
@@ -1428,19 +1486,35 @@ export default function DubbingScreen() {
                 </View>
               )}
 
+              {/* 下载按钮 */}
+              <Pressable 
+                style={[styles.downloadButton, { backgroundColor: colors.success }]}
+                onPress={handleDownloadVideo}
+                disabled={downloading}
+              >
+                {downloading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <IconSymbol name="arrow.down.circle.fill" size={20} color="#FFFFFF" />
+                )}
+                <ThemedText style={styles.downloadButtonText}>
+                  {downloading ? '下载中...' : '下载到相册'}
+                </ThemedText>
+              </Pressable>
+
               {/* 操作按钮 */}
               <View style={styles.modalActions}>
                 <Pressable 
-                  style={[styles.modalButton, { backgroundColor: colors.primary }]}
+                  style={[styles.modalButton, { backgroundColor: colors.backgroundSecondary }]}
                   onPress={() => {
                     setShowCompositeModal(false);
                     resetComposite();
                   }}
                 >
-                  <ThemedText style={styles.modalButtonText}>再录一次</ThemedText>
+                  <ThemedText style={[styles.modalButtonText, { color: colors.text }]}>再录一次</ThemedText>
                 </Pressable>
                 <Pressable 
-                  style={[styles.modalButton, { backgroundColor: colors.success }]}
+                  style={[styles.modalButton, { backgroundColor: colors.primary }]}
                   onPress={() => {
                     setShowCompositeModal(false);
                     router.back();
@@ -1451,7 +1525,7 @@ export default function DubbingScreen() {
               </View>
 
               <ThemedText style={[styles.compositeHint, { color: colors.textSecondary }]}>
-                你可以在"我的配音"中查看和下载所有录制的配音
+                你也可以在"我的配音"中查看和管理所有录制的配音
               </ThemedText>
             </ScrollView>
           </View>
@@ -2445,5 +2519,19 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 12,
     textAlign: 'center',
+  },
+  downloadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 8,
+    marginBottom: 16,
+  },
+  downloadButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

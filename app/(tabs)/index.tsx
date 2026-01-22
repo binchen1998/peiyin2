@@ -39,7 +39,9 @@ export default function HomeScreen() {
       const response = await fetch(`${API_BASE_URL}/api/app/cartoons?featured_only=true`);
       if (response.ok) {
         const data = await response.json();
-        const formattedCartoons: Cartoon[] = data.map((item: any) => ({
+        // 服务器返回 { items: [...], total, page, ... } 格式
+        const items = data.items || data;
+        const formattedCartoons: Cartoon[] = (Array.isArray(items) ? items : []).map((item: any) => ({
           id: item.id,
           name: item.name,
           nameCN: item.nameCN,
@@ -59,7 +61,9 @@ export default function HomeScreen() {
       const response = await fetch(API_ENDPOINTS.recommendations);
       if (response.ok) {
         const data = await response.json();
-        setRecommendedClips(data);
+        // 服务器返回 { items: [...], total, page, ... } 格式
+        const items = data.items || data;
+        setRecommendedClips(Array.isArray(items) ? items : []);
       }
     } catch (error) {
       console.error('获取推荐片段失败:', error);
