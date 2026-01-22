@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Pressable, FlatList, Dimensions, ActivityIndicator, Modal, Alert, Linking, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Video, ResizeMode } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import { Image } from 'expo-image';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { VideoPlayer } from '@/components/video-player';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { API_BASE_URL, API_ENDPOINTS } from '@/config/api';
+import { API_BASE_URL, API_ENDPOINTS, getStreamingVideoUrl } from '@/config/api';
 import { getUserId } from '@/hooks/use-user-profile';
 
 const { width } = Dimensions.get('window');
@@ -118,7 +119,7 @@ export default function MyDubbingsScreen() {
 
       setDownloading(dubbing.id);
 
-      const videoUrl = `${API_BASE_URL}${dubbing.composite_video_path}`;
+      const videoUrl = getStreamingVideoUrl(dubbing.composite_video_path);
       const fileName = `dubbing_${dubbing.id}_${Date.now()}.mp4`;
       const fileUri = `${FileSystem.documentDirectory}${fileName}`;
 
@@ -228,11 +229,10 @@ export default function MyDubbingsScreen() {
       {/* 缩略图 */}
       <View style={styles.thumbnailContainer}>
         {item.thumbnail ? (
-          <Video
+          <Image
             source={{ uri: item.thumbnail }}
             style={styles.thumbnail}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay={false}
+            contentFit="cover"
           />
         ) : (
           <View style={[styles.thumbnailPlaceholder, { backgroundColor: colors.backgroundSecondary }]}>
@@ -376,12 +376,13 @@ export default function MyDubbingsScreen() {
 
             {previewDubbing && previewDubbing.composite_video_path && (
               <>
-                <Video
-                  source={{ uri: `${API_BASE_URL}${previewDubbing.composite_video_path}` }}
+                <ThemedText style={{ color: colors.textSecondary, fontSize: 10, padding: 8 }}>
+                  视频: {getStreamingVideoUrl(previewDubbing.composite_video_path)}
+                </ThemedText>
+                <VideoPlayer
+                  uri={getStreamingVideoUrl(previewDubbing.composite_video_path)}
                   style={styles.previewVideo}
-                  resizeMode={ResizeMode.CONTAIN}
-                  useNativeControls={true}
-                  shouldPlay={true}
+                  autoPlay={true}
                 />
                 
                 <View style={styles.previewInfo}>

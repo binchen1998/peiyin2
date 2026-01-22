@@ -67,6 +67,23 @@ export const API_ENDPOINTS = {
     `${API_BASE_URL}/api/app/user/${userId}/dubbings/${dubbingId}`,
 };
 
+/**
+ * 将视频路径转换为流式视频 URL（支持 Range 请求）
+ * 后端的 composite_video_path 格式为 /user_dubbings/xxx.mp4
+ * 需要转换为 /api/app/video/xxx.mp4
+ * 
+ * @param path 视频路径，如 /user_dubbings/xxx.mp4
+ * @returns 完整的流式视频 URL
+ */
+export const getStreamingVideoUrl = (path: string): string => {
+  if (!path) return '';
+  
+  // 从 /user_dubbings/xxx.mp4 提取文件名
+  const filename = path.replace(/^\/user_dubbings\//, '');
+  
+  return `${API_BASE_URL}/api/app/video/${filename}`;
+};
+
 // 调试用：打印当前 API 地址
 if (__DEV__) {
   console.log('API Base URL:', API_BASE_URL);

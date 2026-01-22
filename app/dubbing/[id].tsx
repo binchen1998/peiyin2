@@ -3,17 +3,18 @@ import { StyleSheet, View, Pressable, Dimensions, ActivityIndicator, Platform, M
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { VideoPlayer } from '@/components/video-player';
 import { Colors, getScoreColor, getScoreFeedback } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { fetchClipByPath } from '@/data/mock-data';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ScoringResult, DubbingClip, WordScore } from '@/types';
-import { API_BASE_URL, API_ENDPOINTS, VOSK_SERVICE_URL } from '@/config/api';
+import { API_BASE_URL, API_ENDPOINTS, VOSK_SERVICE_URL, getStreamingVideoUrl } from '@/config/api';
 import { getUserId } from '@/hooks/use-user-profile';
 
 const { width } = Dimensions.get('window');
@@ -867,6 +868,9 @@ export default function DubbingScreen() {
             clearInterval(compositePollingRef.current);
             compositePollingRef.current = null;
           }
+          console.log('===== 合成完成 =====');
+          console.log('composite_video_path:', result.composite_video_path);
+          console.log('完整视频URL:', `${API_BASE_URL}${result.composite_video_path}`);
           setCompositeVideoPath(result.composite_video_path);
           setCompositeStatus('completed');
           setShowCompositeModal(true);
@@ -908,7 +912,7 @@ export default function DubbingScreen() {
 
       setDownloading(true);
 
-      const videoUrl = `${API_BASE_URL}${compositeVideoPath}`;
+      const videoUrl = getStreamingVideoUrl(compositeVideoPath);
       const fileName = `dubbing_${Date.now()}.mp4`;
       const fileUri = `${FileSystem.documentDirectory}${fileName}`;
 
@@ -1477,13 +1481,20 @@ export default function DubbingScreen() {
               {/* 预览视频 */}
               {compositeVideoPath && (
                 <View style={styles.compositePreview}>
-                  <Video
-                    source={{ uri: `${API_BASE_URL}${compositeVideoPath}` }}
+                  <ThemedText style={{ color: colors.textSecondary, fontSize: 10, marginBottom: 4 }}>
+                    视频: {getStreamingVideoUrl(compositeVideoPath)}
+                  </ThemedText>
+                  <VideoPlayer
+                    uri={getStreamingVideoUrl(compositeVideoPath)}
                     style={styles.compositeVideo}
-                    resizeMode={ResizeMode.CONTAIN}
-                    useNativeControls={true}
+                    autoPlay={true}
                   />
                 </View>
+              )}
+              {!compositeVideoPath && (
+                <ThemedText style={{ color: colors.error, textAlign: 'center', marginBottom: 16 }}>
+                  compositeVideoPath 为空
+                </ThemedText>
               )}
 
               {/* 下载按钮 */}
@@ -2514,6 +2525,7 @@ const styles = StyleSheet.create({
   compositeVideo: {
     width: '100%',
     height: 200,
+    backgroundColor: '#000',
   },
   compositeHint: {
     marginTop: 16,

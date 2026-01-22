@@ -59,7 +59,8 @@
           "photosPermission": "允许 $(PRODUCT_NAME) 访问相册来选择头像"
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,

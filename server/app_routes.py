@@ -6,9 +6,11 @@ App 前端 API 路由
 import os
 import uuid
 import httpx
+import mimetypes
 from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Request
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
@@ -820,3 +822,100 @@ def delete_user_dubbing_record(
         raise HTTPException(status_code=404, detail="配音不存在或无权删除")
     
     return {"status": "ok"}
+
+
+# ===== 视频流接口（支持 Range 请求）=====
+
+@router.get("/video/{filename:path}")
+async def stream_video(filename: str, request: Request):
+    """
+    视频流接口，支持 HTTP Range 请求
+    iOS 视频播放器需要 Range 请求支持
+    
+    Args:
+        filename: 视频文件名（在 user_dubbings 目录下）
+        request: HTTP 请求对象（获取 Range 头）
+    
+    Returns:
+        视频流响应
+    """
+    video_path = os.path.join(USER_DUBBINGS_DIR, filename)
+    
+    if not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+    
+    file_size = os.path.getsize(video_path)
+    
+    # 获取 Content-Type
+    content_type, _ = mimetypes.guess_type(video_path)
+    if content_type is None:
+        content_type = "video/mp4"
+    
+    # 检查是否有 Range 请求头
+    range_header = request.headers.get("range")
+    
+    if range_header:
+        # 解析 Range 头: bytes=start-end
+        try:
+            range_value = range_header.replace("bytes=", "")
+            if "-" in range_value:
+                parts = range_value.split("-")
+                start = int(parts[0]) if parts[0] else 0
+                end = int(parts[1]) if parts[1] else file_size - 1
+            else:
+                start = int(range_value)
+                end = file_size - 1
+        except ValueError:
+            start = 0
+            end = file_size - 1
+        
+        # 确保范围有效
+        start = max(0, min(start, file_size - 1))
+        end = max(start, min(end, file_size - 1))
+        
+        content_length = end - start + 1
+        
+        # 创建生成器读取文件片段
+        def iter_file():
+            with open(video_path, "rb") as f:
+                f.seek(start)
+                remaining = content_length
+                while remaining > 0:
+                    chunk_size = min(8192, remaining)
+                    data = f.read(chunk_size)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+        
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(content_length),
+            "Content-Type": content_type,
+        }
+        
+        return StreamingResponse(
+            iter_file(),
+            status_code=206,  # Partial Content
+            headers=headers,
+            media_type=content_type
+        )
+    else:
+        # 没有 Range 请求，返回整个文件
+        def iter_file():
+            with open(video_path, "rb") as f:
+                while chunk := f.read(8192):
+                    yield chunk
+        
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Content-Type": content_type,
+        }
+        
+        return StreamingResponse(
+            iter_file(),
+            headers=headers,
+            media_type=content_type
+        )
