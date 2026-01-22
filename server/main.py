@@ -21,7 +21,6 @@ from scoring import VoskScorer, ScoringResult
 from database import init_db, get_db, init_sample_data, DubbingRecord
 from admin_routes import router as admin_router
 from app_routes import router as app_router
-from worker import start_worker, stop_worker
 
 # 添加 httpx 到依赖（用于 app_routes 中的远程 JSON 请求）
 
@@ -85,16 +84,8 @@ async def startup_event():
         logger.error(f"Vosk 评分器初始化失败: {e}")
         logger.info("将使用模拟评分模式")
     
-    # 启动后台 Worker（每小时生成推荐片段）
-    start_worker()
-    logger.info("后台 Worker 已启动")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """应用关闭时清理"""
-    stop_worker()
-    logger.info("后台 Worker 已停止")
+    # 注意：Worker 需要单独启动，运行 python run_worker.py
+    logger.info("API 服务已启动（Worker 需单独运行）")
 
 @app.get("/")
 async def root():
