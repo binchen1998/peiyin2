@@ -21,7 +21,8 @@ from sqlalchemy.orm import Session
 from database import (
     get_db_session, Season, RecommendedClip,
     clear_recommended_clips, add_recommended_clip, get_recommended_clips,
-    VocalRemovalTask, get_pending_vocal_removal_tasks, update_vocal_removal_task
+    VocalRemovalTask, get_pending_vocal_removal_tasks, update_vocal_removal_task,
+    cleanup_failed_vocal_removal_tasks
 )
 
 logger = logging.getLogger(__name__)
@@ -383,6 +384,15 @@ async def vocal_removal_worker():
     定期检查待处理的任务并执行
     """
     logger.info("人声去除 Worker 已启动")
+    
+    # 启动时清理失败的任务，允许重新处理
+    db = get_db_session()
+    try:
+        deleted_count = cleanup_failed_vocal_removal_tasks(db)
+        if deleted_count > 0:
+            logger.info(f"已清理 {deleted_count} 个失败的人声去除任务")
+    finally:
+        db.close()
     
     while True:
         try:

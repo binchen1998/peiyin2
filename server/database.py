@@ -435,6 +435,20 @@ def get_pending_vocal_removal_tasks(db: Session) -> list:
     return db.query(VocalRemovalTask).filter(VocalRemovalTask.status == "pending").all()
 
 
+def delete_vocal_removal_task(db: Session, video_url: str) -> bool:
+    """删除指定的人声去除任务"""
+    result = db.query(VocalRemovalTask).filter(VocalRemovalTask.video_url == video_url).delete()
+    db.commit()
+    return result > 0
+
+
+def cleanup_failed_vocal_removal_tasks(db: Session) -> int:
+    """清理所有失败的人声去除任务，返回删除的数量"""
+    result = db.query(VocalRemovalTask).filter(VocalRemovalTask.status == "failed").delete()
+    db.commit()
+    return result
+
+
 # 初始化示例数据
 def init_sample_data(db: Session):
     """初始化示例数据"""
