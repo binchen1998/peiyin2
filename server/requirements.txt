@@ -24,6 +24,5 @@ httpx==0.26.0
 
 # 人声分离（Demucs）
 demucs>=4.0.0
-torch>=2.0.0
-torchaudio>=2.0.0
-torchcodec
+torch==2.1.0
+torchaudio==2.1.0

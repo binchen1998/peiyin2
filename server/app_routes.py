@@ -3,10 +3,12 @@ App 前端 API 路由
 提供给 React Native App 使用的接口
 """
 
+import os
+import uuid
 import httpx
 from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
 from urllib.parse import urljoin
@@ -14,7 +16,10 @@ from urllib.parse import urljoin
 from database import (
     get_db, Cartoon, Season, DubbingRecord, RecommendedClip, get_recommended_clips,
     VocalRemovalTask, get_vocal_removal_task, create_vocal_removal_task,
-    delete_vocal_removal_task, cleanup_failed_vocal_removal_tasks
+    delete_vocal_removal_task, cleanup_failed_vocal_removal_tasks,
+    UserDubbing, create_user_dubbing, get_user_dubbing_by_id, update_user_dubbing,
+    get_user_dubbings_by_user, count_user_dubbings_by_user,
+    get_public_user_dubbings, count_public_user_dubbings, delete_user_dubbing
 )
 from schemas import (
     AppCartoonResponse, AppSeasonResponse, 
@@ -551,3 +556,268 @@ def get_vocal_removal_status(
         output_video_path=task.output_video_path,
         error_message=task.error_message
     )
+
+
+# ===== 视频合成接口 =====
+
+# 用户音频存储目录
+USER_AUDIO_DIR = os.path.join(os.path.dirname(__file__), "user_audio")
+USER_DUBBINGS_DIR = os.path.join(os.path.dirname(__file__), "user_dubbings")
+os.makedirs(USER_AUDIO_DIR, exist_ok=True)
+os.makedirs(USER_DUBBINGS_DIR, exist_ok=True)
+
+
+class CompositeVideoResponse(BaseModel):
+    """视频合成响应"""
+    task_id: int
+    status: str  # pending, processing, completed, failed
+    composite_video_path: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class UserDubbingResponse(BaseModel):
+    """用户配音响应"""
+    id: int
+    user_id: str
+    clip_path: str
+    season_id: Optional[str] = None
+    original_video_url: str
+    composite_video_path: Optional[str] = None
+    status: str
+    is_public: bool
+    original_text: Optional[str] = None
+    translation_cn: Optional[str] = None
+    thumbnail: Optional[str] = None
+    duration: float
+    created_at: str
+
+
+@router.post("/composite-video", response_model=CompositeVideoResponse)
+async def create_composite_video(
+    audio: UploadFile = File(...),
+    video_url: str = Form(...),
+    clip_path: str = Form(...),
+    user_id: str = Form(...),
+    season_id: str = Form(None),
+    original_text: str = Form(None),
+    translation_cn: str = Form(None),
+    thumbnail: str = Form(None),
+    duration: float = Form(0),
+    db: Session = Depends(get_db)
+):
+    """
+    提交视频合成请求
+    
+    接收用户录音和原始视频URL，后台 Worker 会：
+    1. 获取或创建背景音（从原视频分离人声）
+    2. 获取或创建无声视频
+    3. 合并用户配音和背景音
+    4. 将合成音频与无声视频合成
+    5. 返回最终视频路径
+    
+    客户端可以轮询 GET /api/app/composite-video 查询处理状态
+    """
+    try:
+        # 保存用户上传的音频文件
+        audio_filename = f"{uuid.uuid4().hex}_{audio.filename or 'recording.m4a'}"
+        audio_path = os.path.join(USER_AUDIO_DIR, audio_filename)
+        
+        content = await audio.read()
+        with open(audio_path, 'wb') as f:
+            f.write(content)
+        
+        # 创建配音任务记录
+        dubbing = create_user_dubbing(
+            db,
+            user_id=user_id,
+            clip_path=clip_path,
+            season_id=season_id,
+            original_video_url=video_url,
+            user_audio_path=f"/user_audio/{audio_filename}",
+            status="pending",
+            original_text=original_text,
+            translation_cn=translation_cn,
+            thumbnail=thumbnail,
+            duration=duration
+        )
+        
+        return CompositeVideoResponse(
+            task_id=dubbing.id,
+            status=dubbing.status,
+            composite_video_path=None,
+            error_message=None
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建任务失败: {str(e)}")
+
+
+@router.get("/composite-video", response_model=CompositeVideoResponse)
+def get_composite_video_status(
+    task_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    查询视频合成任务状态（轮询接口）
+    
+    Args:
+        task_id: 任务ID
+    
+    Returns:
+        任务状态和结果
+    """
+    dubbing = get_user_dubbing_by_id(db, task_id)
+    
+    if not dubbing:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    return CompositeVideoResponse(
+        task_id=dubbing.id,
+        status=dubbing.status,
+        composite_video_path=dubbing.composite_video_path,
+        error_message=dubbing.error_message
+    )
+
+
+# ===== 用户配音列表接口 =====
+
+@router.get("/user/{user_id}/dubbings")
+def get_user_dubbing_list(
+    user_id: str,
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db)
+):
+    """
+    获取用户的配音列表
+    
+    Args:
+        user_id: 用户ID
+        page: 页码
+        page_size: 每页数量
+    
+    Returns:
+        用户配音列表（分页）
+    """
+    offset = (page - 1) * page_size
+    total = count_user_dubbings_by_user(db, user_id)
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+    
+    dubbings = get_user_dubbings_by_user(db, user_id, offset, page_size)
+    
+    items = [
+        UserDubbingResponse(
+            id=d.id,
+            user_id=d.user_id,
+            clip_path=d.clip_path,
+            season_id=d.season_id,
+            original_video_url=d.original_video_url,
+            composite_video_path=d.composite_video_path,
+            status=d.status,
+            is_public=d.is_public,
+            original_text=d.original_text,
+            translation_cn=d.translation_cn,
+            thumbnail=d.thumbnail,
+            duration=d.duration or 0,
+            created_at=d.created_at.isoformat() if d.created_at else ""
+        )
+        for d in dubbings
+    ]
+    
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
+
+
+@router.get("/dubbings/public")
+def get_public_dubbing_list(
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db)
+):
+    """
+    获取公开分享的配音列表
+    
+    Args:
+        page: 页码
+        page_size: 每页数量
+    
+    Returns:
+        公开配音列表（分页）
+    """
+    offset = (page - 1) * page_size
+    total = count_public_user_dubbings(db)
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+    
+    dubbings = get_public_user_dubbings(db, offset, page_size)
+    
+    items = [
+        UserDubbingResponse(
+            id=d.id,
+            user_id=d.user_id,
+            clip_path=d.clip_path,
+            season_id=d.season_id,
+            original_video_url=d.original_video_url,
+            composite_video_path=d.composite_video_path,
+            status=d.status,
+            is_public=d.is_public,
+            original_text=d.original_text,
+            translation_cn=d.translation_cn,
+            thumbnail=d.thumbnail,
+            duration=d.duration or 0,
+            created_at=d.created_at.isoformat() if d.created_at else ""
+        )
+        for d in dubbings
+    ]
+    
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
+
+
+@router.put("/user/{user_id}/dubbings/{dubbing_id}/public")
+def update_dubbing_public_status(
+    user_id: str,
+    dubbing_id: int,
+    is_public: bool,
+    db: Session = Depends(get_db)
+):
+    """
+    更新配音的公开状态
+    """
+    dubbing = get_user_dubbing_by_id(db, dubbing_id)
+    
+    if not dubbing:
+        raise HTTPException(status_code=404, detail="配音不存在")
+    
+    if dubbing.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权操作此配音")
+    
+    updated = update_user_dubbing(db, dubbing_id, is_public=is_public)
+    
+    return {"status": "ok", "is_public": updated.is_public}
+
+
+@router.delete("/user/{user_id}/dubbings/{dubbing_id}")
+def delete_user_dubbing_record(
+    user_id: str,
+    dubbing_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    删除用户配音
+    """
+    success = delete_user_dubbing(db, dubbing_id, user_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="配音不存在或无权删除")
+    
+    return {"status": "ok"}

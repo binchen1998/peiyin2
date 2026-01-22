@@ -22,7 +22,9 @@ from database import (
     get_db_session, Season, RecommendedClip,
     clear_recommended_clips, add_recommended_clip, get_recommended_clips,
     VocalRemovalTask, get_pending_vocal_removal_tasks, update_vocal_removal_task,
-    cleanup_failed_vocal_removal_tasks
+    cleanup_failed_vocal_removal_tasks,
+    MediaCache, get_media_cache, create_media_cache, get_media_cache_by_url_and_type,
+    UserDubbing, get_pending_user_dubbings, update_user_dubbing, cleanup_failed_user_dubbings
 )
 
 logger = logging.getLogger(__name__)
@@ -30,11 +32,22 @@ logger = logging.getLogger(__name__)
 # Worker 配置
 RECOMMENDATION_INTERVAL_SECONDS = 60 * 60  # 1小时
 RECOMMENDATION_COUNT = 20  # 生成20个推荐
-VOCAL_REMOVAL_CHECK_INTERVAL = 5  # 每5秒检查一次人声去除任务
+VOCAL_REMOVAL_CHECK_INTERVAL = 1  # 每1秒检查一次人声去除任务
+COMPOSITE_VIDEO_CHECK_INTERVAL = 1  # 每1秒检查一次视频合成任务
 
 # 人声去除相关配置
 VOCAL_REMOVAL_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "vocal_removed")
 os.makedirs(VOCAL_REMOVAL_OUTPUT_DIR, exist_ok=True)
+
+# 媒体缓存相关配置
+MEDIA_CACHE_DIR = os.path.join(os.path.dirname(__file__), "media_cache")
+BACKGROUND_CACHE_DIR = os.path.join(MEDIA_CACHE_DIR, "background")
+MUTE_VIDEO_CACHE_DIR = os.path.join(MEDIA_CACHE_DIR, "mute_video")
+USER_AUDIO_DIR = os.path.join(os.path.dirname(__file__), "user_audio")
+USER_DUBBINGS_DIR = os.path.join(os.path.dirname(__file__), "user_dubbings")
+os.makedirs(BACKGROUND_CACHE_DIR, exist_ok=True)
+os.makedirs(MUTE_VIDEO_CACHE_DIR, exist_ok=True)
+os.makedirs(USER_DUBBINGS_DIR, exist_ok=True)
 
 
 def get_base_url(all_json_url: str) -> str:
@@ -419,14 +432,276 @@ async def vocal_removal_worker():
             await asyncio.sleep(10)
 
 
+# ===== 视频合成功能 =====
+
+def get_cache_key(video_url: str, cache_type: str) -> str:
+    """生成缓存key"""
+    url_hash = get_url_hash(video_url)
+    return f"{url_hash}:{cache_type}"
+
+
+def create_mute_video(video_path: str, output_path: str) -> bool:
+    """创建无声视频（移除音轨）"""
+    try:
+        cmd = [
+            'ffmpeg', '-y',
+            '-i', video_path,
+            '-c:v', 'copy',
+            '-an',  # 移除音轨
+            output_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logger.error(f"创建无声视频失败: {result.stderr}")
+            return False
+        logger.info(f"无声视频创建完成: {output_path}")
+        return True
+    except Exception as e:
+        logger.error(f"创建无声视频异常: {e}")
+        return False
+
+
+def merge_audio_files(audio1_path: str, audio2_path: str, output_path: str) -> bool:
+    """合并两个音频文件（混音）"""
+    try:
+        cmd = [
+            'ffmpeg', '-y',
+            '-i', audio1_path,
+            '-i', audio2_path,
+            '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=longest[out]',
+            '-map', '[out]',
+            '-c:a', 'aac',
+            output_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logger.error(f"合并音频失败: {result.stderr}")
+            return False
+        logger.info(f"音频合并完成: {output_path}")
+        return True
+    except Exception as e:
+        logger.error(f"合并音频异常: {e}")
+        return False
+
+
+async def get_or_create_background_and_mute_video(video_url: str) -> tuple:
+    """
+    获取或创建背景音和无声视频
+    返回: (background_audio_path, mute_video_path) 或 (None, None) 如果失败
+    """
+    db = get_db_session()
+    
+    try:
+        url_hash = get_url_hash(video_url)
+        
+        # 检查缓存
+        bg_cache_key = f"{url_hash}:background"
+        mute_cache_key = f"{url_hash}:mute-video"
+        
+        bg_cache = get_media_cache(db, bg_cache_key)
+        mute_cache = get_media_cache(db, mute_cache_key)
+        
+        # 如果两个缓存都存在，直接返回
+        if bg_cache and mute_cache:
+            bg_path = os.path.join(os.path.dirname(__file__), bg_cache.file_path.lstrip('/'))
+            mute_path = os.path.join(os.path.dirname(__file__), mute_cache.file_path.lstrip('/'))
+            if os.path.exists(bg_path) and os.path.exists(mute_path):
+                logger.info(f"使用缓存的背景音和无声视频: {video_url}")
+                return (bg_path, mute_path)
+        
+        # 需要创建缓存
+        logger.info(f"创建背景音和无声视频缓存: {video_url}")
+        
+        # 创建临时工作目录
+        work_dir = tempfile.mkdtemp(prefix=f"composite_{url_hash}_")
+        
+        try:
+            # 1. 下载视频
+            video_ext = Path(video_url).suffix or '.mp4'
+            downloaded_video = os.path.join(work_dir, f"original{video_ext}")
+            
+            if not await download_video(video_url, downloaded_video):
+                raise Exception("下载视频失败")
+            
+            # 2. 提取音频
+            audio_path = os.path.join(work_dir, "audio.mp3")
+            if not extract_audio(downloaded_video, audio_path):
+                raise Exception("提取音频失败")
+            
+            # 3. 使用 Demucs 分离人声
+            demucs_output_dir = os.path.join(work_dir, "demucs_output")
+            os.makedirs(demucs_output_dir, exist_ok=True)
+            
+            no_vocals_path = remove_vocals_with_demucs(audio_path, demucs_output_dir)
+            if not no_vocals_path:
+                raise Exception("人声分离失败")
+            
+            # 4. 保存背景音到缓存
+            bg_filename = f"{url_hash}_background.wav"
+            bg_output_path = os.path.join(BACKGROUND_CACHE_DIR, bg_filename)
+            shutil.copy(no_vocals_path, bg_output_path)
+            
+            # 创建背景音缓存记录
+            if not bg_cache:
+                create_media_cache(
+                    db, bg_cache_key, "background",
+                    f"/media_cache/background/{bg_filename}", video_url
+                )
+            
+            # 5. 创建无声视频
+            mute_filename = f"{url_hash}_mute{video_ext}"
+            mute_output_path = os.path.join(MUTE_VIDEO_CACHE_DIR, mute_filename)
+            
+            if not create_mute_video(downloaded_video, mute_output_path):
+                raise Exception("创建无声视频失败")
+            
+            # 创建无声视频缓存记录
+            if not mute_cache:
+                create_media_cache(
+                    db, mute_cache_key, "mute-video",
+                    f"/media_cache/mute_video/{mute_filename}", video_url
+                )
+            
+            logger.info(f"缓存创建完成: {video_url}")
+            return (bg_output_path, mute_output_path)
+            
+        finally:
+            # 清理临时目录
+            try:
+                shutil.rmtree(work_dir)
+            except Exception as e:
+                logger.warning(f"清理临时目录失败: {e}")
+                
+    except Exception as e:
+        logger.error(f"获取或创建缓存失败: {e}")
+        return (None, None)
+    finally:
+        db.close()
+
+
+async def process_composite_video_task(task: UserDubbing) -> dict:
+    """
+    处理视频合成任务
+    
+    流程：
+    1. 获取或创建背景音和无声视频
+    2. 合并用户配音和背景音
+    3. 将合成音频与无声视频合成
+    4. 返回最终视频路径
+    """
+    db = get_db_session()
+    
+    try:
+        # 更新状态为处理中
+        update_user_dubbing(db, task.id, status="processing")
+        
+        # 创建临时工作目录
+        url_hash = get_url_hash(task.original_video_url)
+        work_dir = tempfile.mkdtemp(prefix=f"composite_final_{url_hash}_")
+        
+        try:
+            # 1. 获取或创建背景音和无声视频
+            logger.info(f"开始处理合成任务: {task.id}")
+            bg_audio_path, mute_video_path = await get_or_create_background_and_mute_video(task.original_video_url)
+            
+            if not bg_audio_path or not mute_video_path:
+                raise Exception("获取背景音或无声视频失败")
+            
+            # 2. 获取用户录音路径
+            user_audio_path = os.path.join(os.path.dirname(__file__), task.user_audio_path.lstrip('/'))
+            if not os.path.exists(user_audio_path):
+                raise Exception(f"用户录音文件不存在: {user_audio_path}")
+            
+            # 3. 合并用户配音和背景音
+            merged_audio_path = os.path.join(work_dir, "merged_audio.aac")
+            if not merge_audio_files(user_audio_path, bg_audio_path, merged_audio_path):
+                raise Exception("合并音频失败")
+            
+            # 4. 将合成音频与无声视频合成
+            video_ext = Path(task.original_video_url).suffix or '.mp4'
+            output_filename = f"{task.user_id}_{task.id}_composite{video_ext}"
+            output_video_path = os.path.join(USER_DUBBINGS_DIR, output_filename)
+            
+            if not merge_audio_to_video(mute_video_path, merged_audio_path, output_video_path):
+                raise Exception("合成最终视频失败")
+            
+            # 5. 更新任务状态为完成
+            relative_path = f"/user_dubbings/{output_filename}"
+            update_user_dubbing(
+                db, task.id,
+                status="completed",
+                composite_video_path=relative_path
+            )
+            
+            logger.info(f"合成任务完成: {task.id} -> {relative_path}")
+            return {"success": True, "output_path": relative_path}
+            
+        finally:
+            # 清理临时目录
+            try:
+                shutil.rmtree(work_dir)
+            except Exception as e:
+                logger.warning(f"清理临时目录失败: {e}")
+                
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"处理合成任务失败: {error_msg}")
+        update_user_dubbing(db, task.id, status="failed", error_message=error_msg)
+        return {"success": False, "error": error_msg}
+    finally:
+        db.close()
+
+
+async def composite_video_worker():
+    """
+    视频合成 Worker
+    定期检查待处理的任务并执行
+    """
+    logger.info("视频合成 Worker 已启动")
+    
+    # 启动时清理失败的任务
+    db = get_db_session()
+    try:
+        deleted_count = cleanup_failed_user_dubbings(db)
+        if deleted_count > 0:
+            logger.info(f"已清理 {deleted_count} 个失败的视频合成任务")
+    finally:
+        db.close()
+    
+    while True:
+        try:
+            # 检查待处理的任务
+            db = get_db_session()
+            try:
+                pending_tasks = get_pending_user_dubbings(db)
+                
+                for task in pending_tasks:
+                    logger.info(f"发现待处理的合成任务: {task.id}")
+                    await process_composite_video_task(task)
+                    
+            finally:
+                db.close()
+            
+            # 等待一段时间再检查
+            await asyncio.sleep(COMPOSITE_VIDEO_CHECK_INTERVAL)
+            
+        except asyncio.CancelledError:
+            logger.info("视频合成 Worker 被取消")
+            break
+        except Exception as e:
+            logger.error(f"视频合成 Worker 执行出错: {e}")
+            await asyncio.sleep(10)
+
+
 # Worker 任务引用，用于停止
 _worker_task: Optional[asyncio.Task] = None
 _vocal_removal_worker_task: Optional[asyncio.Task] = None
+_composite_video_worker_task: Optional[asyncio.Task] = None
 
 
 def start_worker():
     """启动 Worker"""
-    global _worker_task, _vocal_removal_worker_task
+    global _worker_task, _vocal_removal_worker_task, _composite_video_worker_task
     
     if _worker_task is None or _worker_task.done():
         _worker_task = asyncio.create_task(recommendation_worker())
@@ -435,11 +710,15 @@ def start_worker():
     if _vocal_removal_worker_task is None or _vocal_removal_worker_task.done():
         _vocal_removal_worker_task = asyncio.create_task(vocal_removal_worker())
         logger.info("人声去除 Worker 任务已创建")
+    
+    if _composite_video_worker_task is None or _composite_video_worker_task.done():
+        _composite_video_worker_task = asyncio.create_task(composite_video_worker())
+        logger.info("视频合成 Worker 任务已创建")
 
 
 def stop_worker():
     """停止 Worker"""
-    global _worker_task, _vocal_removal_worker_task
+    global _worker_task, _vocal_removal_worker_task, _composite_video_worker_task
     
     if _worker_task and not _worker_task.done():
         _worker_task.cancel()
@@ -448,3 +727,7 @@ def stop_worker():
     if _vocal_removal_worker_task and not _vocal_removal_worker_task.done():
         _vocal_removal_worker_task.cancel()
         logger.info("人声去除 Worker 任务已取消")
+    
+    if _composite_video_worker_task and not _composite_video_worker_task.done():
+        _composite_video_worker_task.cancel()
+        logger.info("视频合成 Worker 任务已取消")

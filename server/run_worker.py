@@ -12,7 +12,7 @@ import asyncio
 import logging
 
 from database import init_db
-from worker import recommendation_worker, vocal_removal_worker
+from worker import recommendation_worker, vocal_removal_worker, composite_video_worker
 
 # 配置日志
 logging.basicConfig(
@@ -36,11 +36,13 @@ async def main():
     tasks = [
         asyncio.create_task(recommendation_worker()),
         asyncio.create_task(vocal_removal_worker()),
+        asyncio.create_task(composite_video_worker()),
     ]
     
     logger.info(f"已启动 {len(tasks)} 个 Worker 任务")
     logger.info("  - 推荐片段生成 Worker")
     logger.info("  - 人声去除 Worker")
+    logger.info("  - 视频合成 Worker")
     logger.info("=" * 50)
     
     try:

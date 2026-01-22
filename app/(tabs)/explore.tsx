@@ -336,6 +336,13 @@ export default function ProfileScreen() {
         {/* 功能菜单 */}
         <View style={[styles.menuCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <MenuItem 
+            icon="video.fill" 
+            title="我的配音" 
+            colors={colors}
+            onPress={() => router.push('/my-dubbings')}
+          />
+          <View style={[styles.menuDivider, { backgroundColor: colors.cardBorder }]} />
+          <MenuItem 
             icon="gear" 
             title="设置" 
             colors={colors}
@@ -444,11 +451,12 @@ interface MenuItemProps {
   icon: string;
   title: string;
   colors: typeof Colors.light;
+  onPress?: () => void;
 }
 
-function MenuItem({ icon, title, colors }: MenuItemProps) {
+function MenuItem({ icon, title, colors, onPress }: MenuItemProps) {
   return (
-    <Pressable style={styles.menuItem}>
+    <Pressable style={styles.menuItem} onPress={onPress}>
       <View style={styles.menuItemLeft}>
         <IconSymbol name={icon as any} size={22} color={colors.primary} />
         <ThemedText style={[styles.menuItemTitle, { color: colors.text }]}>{title}</ThemedText>

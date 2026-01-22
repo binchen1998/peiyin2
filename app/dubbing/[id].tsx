@@ -18,6 +18,20 @@ const { width } = Dimensions.get('window');
 
 type RecordingStatus = 'idle' | 'recording' | 'recorded' | 'uploading' | 'scored';
 
+// 配音模式：评分模式 vs 录制模式
+type DubbingMode = 'score' | 'record';
+
+// 合成状态
+type CompositeStatus = 'idle' | 'recording' | 'recorded' | 'uploading' | 'processing' | 'completed' | 'failed';
+
+// 合成任务响应
+interface CompositeVideoResponse {
+  task_id: number;
+  status: string;
+  composite_video_path: string | null;
+  error_message: string | null;
+}
+
 // 评分历史记录类型
 interface ScoreRecord {
   id: number;
@@ -117,6 +131,15 @@ export default function DubbingScreen() {
   const [dictLoading, setDictLoading] = useState(false);
   const [dictError, setDictError] = useState<string | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 配音模式相关状态
+  const [dubbingMode, setDubbingMode] = useState<DubbingMode>('score');
+  const [compositeStatus, setCompositeStatus] = useState<CompositeStatus>('idle');
+  const [compositeTaskId, setCompositeTaskId] = useState<number | null>(null);
+  const [compositeVideoPath, setCompositeVideoPath] = useState<string | null>(null);
+  const [compositeError, setCompositeError] = useState<string | null>(null);
+  const [showCompositeModal, setShowCompositeModal] = useState(false);
+  const compositePollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // 进度条宽度
   const progressBarWidth = width - 32;
@@ -648,6 +671,209 @@ export default function DubbingScreen() {
     setSelectedHistoryRecord(null);
   };
 
+  // ===== 跟读录制模式相关函数 =====
+  
+  // 切换模式
+  const switchMode = (mode: DubbingMode) => {
+    if (mode === dubbingMode) return;
+    
+    // 切换前重置状态
+    resetRecording();
+    resetComposite();
+    setDubbingMode(mode);
+  };
+
+  // 重置合成状态
+  const resetComposite = () => {
+    setCompositeStatus('idle');
+    setCompositeTaskId(null);
+    setCompositeVideoPath(null);
+    setCompositeError(null);
+    setShowCompositeModal(false);
+    
+    // 清除轮询
+    if (compositePollingRef.current) {
+      clearInterval(compositePollingRef.current);
+      compositePollingRef.current = null;
+    }
+  };
+
+  // 开始跟读录制（视频播放 + 录音同步）
+  const startFollowRecording = async () => {
+    try {
+      setError(null);
+      setCompositeError(null);
+      
+      // 设置录音模式
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      // 创建录音
+      const { recording: newRecording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      
+      recordingRef.current = newRecording;
+      setCompositeStatus('recording');
+      
+      // 将视频重置到开头并开始播放
+      if (videoRef.current) {
+        await videoRef.current.setPositionAsync(0);
+        await videoRef.current.playAsync();
+      }
+    } catch (err) {
+      console.error('开始跟读录制失败:', err);
+      setError('开始录制失败，请重试');
+    }
+  };
+
+  // 处理视频播放状态更新（用于跟读模式）
+  const handleFollowPlaybackStatus = (status: AVPlaybackStatus) => {
+    handlePlaybackStatusUpdate(status);
+    
+    // 如果是跟读录制模式且视频播放完成，自动停止录音
+    if (dubbingMode === 'record' && compositeStatus === 'recording') {
+      if (status.isLoaded && status.didJustFinish) {
+        stopFollowRecording();
+      }
+    }
+  };
+
+  // 停止跟读录制
+  const stopFollowRecording = async () => {
+    try {
+      if (!recordingRef.current) return;
+
+      // 停止视频播放
+      if (videoRef.current) {
+        await videoRef.current.pauseAsync();
+      }
+
+      await recordingRef.current.stopAndUnloadAsync();
+      const uri = recordingRef.current.getURI();
+      
+      recordingRef.current = null;
+      setRecordingUri(uri);
+      setCompositeStatus('recorded');
+    } catch (err) {
+      console.error('停止跟读录制失败:', err);
+      setError('停止录制失败，请重试');
+      setCompositeStatus('idle');
+    }
+  };
+
+  // 上传录音并提交合成任务
+  const submitCompositeVideo = async () => {
+    if (!recordingUri || !clip) return;
+
+    setCompositeStatus('uploading');
+    setCompositeError(null);
+
+    try {
+      const userId = await getUserId();
+      
+      // 创建 FormData
+      const formData = new FormData();
+      const audioFile = {
+        uri: recordingUri,
+        type: 'audio/m4a',
+        name: 'recording.m4a',
+      } as any;
+      formData.append('audio', audioFile);
+      formData.append('video_url', clip.videoUrl);
+      formData.append('clip_path', clipPath);
+      formData.append('user_id', userId);
+      if (seasonId) formData.append('season_id', seasonId);
+      if (clip.originalText) formData.append('original_text', clip.originalText);
+      if (clip.translationCN) formData.append('translation_cn', clip.translationCN);
+      if (clip.thumbnail) formData.append('thumbnail', clip.thumbnail);
+      formData.append('duration', String(clip.duration || 0));
+
+      console.log('提交合成任务:', API_ENDPOINTS.compositeVideo);
+      const response = await fetch(API_ENDPOINTS.compositeVideo, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`提交失败: ${response.status}`);
+      }
+
+      const result: CompositeVideoResponse = await response.json();
+      console.log('合成任务创建成功:', result);
+      
+      setCompositeTaskId(result.task_id);
+      setCompositeStatus('processing');
+      
+      // 开始轮询任务状态
+      startCompositePolling(result.task_id);
+      
+    } catch (err) {
+      console.error('提交合成任务失败:', err);
+      setCompositeError('提交失败，请重试');
+      setCompositeStatus('recorded');
+    }
+  };
+
+  // 轮询合成任务状态
+  const startCompositePolling = (taskId: number) => {
+    let pollCount = 0;
+    const maxPolls = 120; // 最多轮询2分钟
+
+    compositePollingRef.current = setInterval(async () => {
+      pollCount++;
+      
+      if (pollCount > maxPolls) {
+        if (compositePollingRef.current) {
+          clearInterval(compositePollingRef.current);
+          compositePollingRef.current = null;
+        }
+        setCompositeError('处理超时，请稍后重试');
+        setCompositeStatus('failed');
+        return;
+      }
+
+      try {
+        const response = await fetch(API_ENDPOINTS.compositeVideoStatus(taskId));
+        const result: CompositeVideoResponse = await response.json();
+
+        if (result.status === 'completed') {
+          if (compositePollingRef.current) {
+            clearInterval(compositePollingRef.current);
+            compositePollingRef.current = null;
+          }
+          setCompositeVideoPath(result.composite_video_path);
+          setCompositeStatus('completed');
+          setShowCompositeModal(true);
+        } else if (result.status === 'failed') {
+          if (compositePollingRef.current) {
+            clearInterval(compositePollingRef.current);
+            compositePollingRef.current = null;
+          }
+          setCompositeError(result.error_message || '处理失败');
+          setCompositeStatus('failed');
+        }
+        // pending 或 processing 状态继续轮询
+      } catch (err) {
+        console.error('轮询状态失败:', err);
+      }
+    }, 1000);
+  };
+
+  // 清理合成轮询
+  useEffect(() => {
+    return () => {
+      if (compositePollingRef.current) {
+        clearInterval(compositePollingRef.current);
+      }
+    };
+  }, []);
+
   // 加载中状态
   if (loading) {
     return (
@@ -708,7 +934,7 @@ export default function DubbingScreen() {
             source={{ uri: clip.videoUrl }}
             style={styles.video}
             resizeMode={ResizeMode.CONTAIN}
-            onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+            onPlaybackStatusUpdate={dubbingMode === 'record' ? handleFollowPlaybackStatus : handlePlaybackStatusUpdate}
             useNativeControls={false}
           />
           
@@ -806,109 +1032,284 @@ export default function DubbingScreen() {
         </ThemedText>
       </View>
 
+      {/* 模式切换标签 */}
+      <View style={[styles.modeTabContainer, { backgroundColor: colors.card, borderBottomColor: colors.cardBorder }]}>
+        <Pressable 
+          style={[
+            styles.modeTab, 
+            dubbingMode === 'score' && { backgroundColor: colors.primary }
+          ]}
+          onPress={() => switchMode('score')}
+        >
+          <IconSymbol name="star.fill" size={16} color={dubbingMode === 'score' ? '#FFFFFF' : colors.textSecondary} />
+          <ThemedText style={[styles.modeTabText, { color: dubbingMode === 'score' ? '#FFFFFF' : colors.textSecondary }]}>
+            评分模式
+          </ThemedText>
+        </Pressable>
+        <Pressable 
+          style={[
+            styles.modeTab, 
+            dubbingMode === 'record' && { backgroundColor: colors.primary }
+          ]}
+          onPress={() => switchMode('record')}
+        >
+          <IconSymbol name="video.fill" size={16} color={dubbingMode === 'record' ? '#FFFFFF' : colors.textSecondary} />
+          <ThemedText style={[styles.modeTabText, { color: dubbingMode === 'record' ? '#FFFFFF' : colors.textSecondary }]}>
+            录制配音
+          </ThemedText>
+        </Pressable>
+      </View>
+
       {/* 录音控制区域 */}
       <View style={styles.controlSection}>
-        {recordingStatus === 'idle' && (
-          <View style={styles.controls}>
-            <ThemedText style={[styles.hint, { color: colors.textSecondary }]}>
-              点击下方按钮开始录音
-            </ThemedText>
-            <Pressable 
-              style={[styles.recordButton, { backgroundColor: colors.error }]}
-              onPress={startRecording}
-            >
-              <IconSymbol name="mic.fill" size={40} color="#FFFFFF" />
-            </Pressable>
-            <ThemedText style={[styles.recordHint, { color: colors.textSecondary }]}>
-              按住录音
-            </ThemedText>
-          </View>
-        )}
-
-        {recordingStatus === 'recording' && (
-          <View style={styles.controls}>
-            <View style={styles.recordingIndicator}>
-              <View style={[styles.recordingDot, { backgroundColor: colors.error }]} />
-              <ThemedText style={[styles.recordingText, { color: colors.error }]}>
-                正在录音...
-              </ThemedText>
-            </View>
-            <Pressable 
-              style={[styles.recordButton, styles.recordingButtonStyle, { backgroundColor: colors.error }]}
-              onPress={stopRecording}
-            >
-              <IconSymbol name="stop.fill" size={40} color="#FFFFFF" />
-            </Pressable>
-            <ThemedText style={[styles.recordHint, { color: colors.textSecondary }]}>
-              点击停止
-            </ThemedText>
-          </View>
-        )}
-
-        {recordingStatus === 'recorded' && (
-          <View style={styles.controls}>
-            <ThemedText style={[styles.hint, { color: colors.textSecondary }]}>
-              {isPlayingRecording ? '正在播放...' : '录音完成！'}
-            </ThemedText>
-            <View style={styles.actionButtons}>
-              <Pressable 
-                style={[
-                  styles.actionButton, 
-                  { 
-                    backgroundColor: isPlayingRecording ? colors.primary : colors.backgroundSecondary, 
-                    borderColor: colors.cardBorder 
-                  }
-                ]}
-                onPress={playRecording}
-              >
-                <IconSymbol 
-                  name={isPlayingRecording ? "stop.fill" : "play.fill"} 
-                  size={24} 
-                  color={isPlayingRecording ? "#FFFFFF" : colors.primary} 
-                />
-                <ThemedText style={[styles.actionButtonText, { color: isPlayingRecording ? "#FFFFFF" : colors.text }]}>
-                  {isPlayingRecording ? '停止' : '试听'}
+        {/* 评分模式的控制 */}
+        {dubbingMode === 'score' && (
+          <>
+            {recordingStatus === 'idle' && (
+              <View style={styles.controls}>
+                <ThemedText style={[styles.hint, { color: colors.textSecondary }]}>
+                  点击下方按钮开始录音
                 </ThemedText>
-              </Pressable>
-              <Pressable 
-                style={[styles.actionButton, { backgroundColor: colors.backgroundSecondary, borderColor: colors.cardBorder }]}
-                onPress={resetRecording}
-              >
-                <IconSymbol name="arrow.counterclockwise" size={24} color={colors.warning} />
-                <ThemedText style={[styles.actionButtonText, { color: colors.text }]}>重录</ThemedText>
-              </Pressable>
-              <Pressable 
-                style={[styles.actionButton, styles.submitButton, { backgroundColor: colors.success }]}
-                onPress={submitRecording}
-              >
-                <IconSymbol name="checkmark" size={24} color="#FFFFFF" />
-                <ThemedText style={[styles.actionButtonText, { color: '#FFFFFF' }]}>提交</ThemedText>
-              </Pressable>
-            </View>
-          </View>
+                <Pressable 
+                  style={[styles.recordButton, { backgroundColor: colors.error }]}
+                  onPress={startRecording}
+                >
+                  <IconSymbol name="mic.fill" size={40} color="#FFFFFF" />
+                </Pressable>
+                <ThemedText style={[styles.recordHint, { color: colors.textSecondary }]}>
+                  按住录音
+                </ThemedText>
+              </View>
+            )}
+
+            {recordingStatus === 'recording' && (
+              <View style={styles.controls}>
+                <View style={styles.recordingIndicator}>
+                  <View style={[styles.recordingDot, { backgroundColor: colors.error }]} />
+                  <ThemedText style={[styles.recordingText, { color: colors.error }]}>
+                    正在录音...
+                  </ThemedText>
+                </View>
+                <Pressable 
+                  style={[styles.recordButton, styles.recordingButtonStyle, { backgroundColor: colors.error }]}
+                  onPress={stopRecording}
+                >
+                  <IconSymbol name="stop.fill" size={40} color="#FFFFFF" />
+                </Pressable>
+                <ThemedText style={[styles.recordHint, { color: colors.textSecondary }]}>
+                  点击停止
+                </ThemedText>
+              </View>
+            )}
+
+            {recordingStatus === 'recorded' && (
+              <View style={styles.controls}>
+                <ThemedText style={[styles.hint, { color: colors.textSecondary }]}>
+                  {isPlayingRecording ? '正在播放...' : '录音完成！'}
+                </ThemedText>
+                <View style={styles.actionButtons}>
+                  <Pressable 
+                    style={[
+                      styles.actionButton, 
+                      { 
+                        backgroundColor: isPlayingRecording ? colors.primary : colors.backgroundSecondary, 
+                        borderColor: colors.cardBorder 
+                      }
+                    ]}
+                    onPress={playRecording}
+                  >
+                    <IconSymbol 
+                      name={isPlayingRecording ? "stop.fill" : "play.fill"} 
+                      size={24} 
+                      color={isPlayingRecording ? "#FFFFFF" : colors.primary} 
+                    />
+                    <ThemedText style={[styles.actionButtonText, { color: isPlayingRecording ? "#FFFFFF" : colors.text }]}>
+                      {isPlayingRecording ? '停止' : '试听'}
+                    </ThemedText>
+                  </Pressable>
+                  <Pressable 
+                    style={[styles.actionButton, { backgroundColor: colors.backgroundSecondary, borderColor: colors.cardBorder }]}
+                    onPress={resetRecording}
+                  >
+                    <IconSymbol name="arrow.counterclockwise" size={24} color={colors.warning} />
+                    <ThemedText style={[styles.actionButtonText, { color: colors.text }]}>重录</ThemedText>
+                  </Pressable>
+                  <Pressable 
+                    style={[styles.actionButton, styles.submitButton, { backgroundColor: colors.success }]}
+                    onPress={submitRecording}
+                  >
+                    <IconSymbol name="checkmark" size={24} color="#FFFFFF" />
+                    <ThemedText style={[styles.actionButtonText, { color: '#FFFFFF' }]}>提交</ThemedText>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            {recordingStatus === 'uploading' && (
+              <View style={styles.controls}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <ThemedText style={[styles.uploadingText, { color: colors.textSecondary }]}>
+                  正在评分中...
+                </ThemedText>
+              </View>
+            )}
+
+            {recordingStatus === 'scored' && (
+              <View style={styles.controls}>
+                <ThemedText style={[styles.hint, { color: colors.success }]}>
+                  ✅ 评分完成！
+                </ThemedText>
+                <Pressable 
+                  style={[styles.viewScoreButton, { backgroundColor: colors.primary }]}
+                  onPress={() => setShowScoreModal(true)}
+                >
+                  <ThemedText style={styles.viewScoreButtonText}>查看评分结果</ThemedText>
+                </Pressable>
+              </View>
+            )}
+          </>
         )}
 
-        {recordingStatus === 'uploading' && (
-          <View style={styles.controls}>
-            <ActivityIndicator size="large" color={colors.primary} />
-            <ThemedText style={[styles.uploadingText, { color: colors.textSecondary }]}>
-              正在评分中...
-            </ThemedText>
-          </View>
-        )}
+        {/* 录制配音模式的控制 */}
+        {dubbingMode === 'record' && (
+          <>
+            {compositeStatus === 'idle' && (
+              <View style={styles.controls}>
+                <ThemedText style={[styles.hint, { color: colors.textSecondary }]}>
+                  点击按钮，视频会自动播放，同时录制你的配音
+                </ThemedText>
+                <Pressable 
+                  style={[styles.recordButton, { backgroundColor: colors.primary }]}
+                  onPress={startFollowRecording}
+                >
+                  <IconSymbol name="video.fill" size={40} color="#FFFFFF" />
+                </Pressable>
+                <ThemedText style={[styles.recordHint, { color: colors.textSecondary }]}>
+                  跟读录制
+                </ThemedText>
+              </View>
+            )}
 
-        {recordingStatus === 'scored' && (
-          <View style={styles.controls}>
-            <ThemedText style={[styles.hint, { color: colors.success }]}>
-              ✅ 评分完成！
-            </ThemedText>
-            <Pressable 
-              style={[styles.viewScoreButton, { backgroundColor: colors.primary }]}
-              onPress={() => setShowScoreModal(true)}
-            >
-              <ThemedText style={styles.viewScoreButtonText}>查看评分结果</ThemedText>
-            </Pressable>
-          </View>
+            {compositeStatus === 'recording' && (
+              <View style={styles.controls}>
+                <View style={styles.recordingIndicator}>
+                  <View style={[styles.recordingDot, { backgroundColor: colors.error }]} />
+                  <ThemedText style={[styles.recordingText, { color: colors.error }]}>
+                    正在跟读录制...
+                  </ThemedText>
+                </View>
+                <Pressable 
+                  style={[styles.recordButton, styles.recordingButtonStyle, { backgroundColor: colors.error }]}
+                  onPress={stopFollowRecording}
+                >
+                  <IconSymbol name="stop.fill" size={40} color="#FFFFFF" />
+                </Pressable>
+                <ThemedText style={[styles.recordHint, { color: colors.textSecondary }]}>
+                  点击停止（或等视频播完自动停止）
+                </ThemedText>
+              </View>
+            )}
+
+            {compositeStatus === 'recorded' && (
+              <View style={styles.controls}>
+                <ThemedText style={[styles.hint, { color: colors.textSecondary }]}>
+                  {isPlayingRecording ? '正在播放...' : '录制完成！'}
+                </ThemedText>
+                <View style={styles.actionButtons}>
+                  <Pressable 
+                    style={[
+                      styles.actionButton, 
+                      { 
+                        backgroundColor: isPlayingRecording ? colors.primary : colors.backgroundSecondary, 
+                        borderColor: colors.cardBorder 
+                      }
+                    ]}
+                    onPress={playRecording}
+                  >
+                    <IconSymbol 
+                      name={isPlayingRecording ? "stop.fill" : "play.fill"} 
+                      size={24} 
+                      color={isPlayingRecording ? "#FFFFFF" : colors.primary} 
+                    />
+                    <ThemedText style={[styles.actionButtonText, { color: isPlayingRecording ? "#FFFFFF" : colors.text }]}>
+                      {isPlayingRecording ? '停止' : '试听'}
+                    </ThemedText>
+                  </Pressable>
+                  <Pressable 
+                    style={[styles.actionButton, { backgroundColor: colors.backgroundSecondary, borderColor: colors.cardBorder }]}
+                    onPress={resetComposite}
+                  >
+                    <IconSymbol name="arrow.counterclockwise" size={24} color={colors.warning} />
+                    <ThemedText style={[styles.actionButtonText, { color: colors.text }]}>重录</ThemedText>
+                  </Pressable>
+                  <Pressable 
+                    style={[styles.actionButton, styles.submitButton, { backgroundColor: colors.success }]}
+                    onPress={submitCompositeVideo}
+                  >
+                    <IconSymbol name="arrow.up.circle.fill" size={24} color="#FFFFFF" />
+                    <ThemedText style={[styles.actionButtonText, { color: '#FFFFFF' }]}>上传</ThemedText>
+                  </Pressable>
+                </View>
+                {compositeError && (
+                  <ThemedText style={[styles.errorHint, { color: colors.error }]}>
+                    {compositeError}
+                  </ThemedText>
+                )}
+              </View>
+            )}
+
+            {compositeStatus === 'uploading' && (
+              <View style={styles.controls}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <ThemedText style={[styles.uploadingText, { color: colors.textSecondary }]}>
+                  正在上传...
+                </ThemedText>
+              </View>
+            )}
+
+            {compositeStatus === 'processing' && (
+              <View style={styles.controls}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <ThemedText style={[styles.uploadingText, { color: colors.textSecondary }]}>
+                  正在合成视频，请稍候...
+                </ThemedText>
+                <ThemedText style={[styles.processingHint, { color: colors.textSecondary }]}>
+                  这可能需要1-2分钟
+                </ThemedText>
+              </View>
+            )}
+
+            {compositeStatus === 'completed' && (
+              <View style={styles.controls}>
+                <ThemedText style={[styles.hint, { color: colors.success }]}>
+                  ✅ 合成完成！
+                </ThemedText>
+                <Pressable 
+                  style={[styles.viewScoreButton, { backgroundColor: colors.primary }]}
+                  onPress={() => setShowCompositeModal(true)}
+                >
+                  <ThemedText style={styles.viewScoreButtonText}>查看合成视频</ThemedText>
+                </Pressable>
+              </View>
+            )}
+
+            {compositeStatus === 'failed' && (
+              <View style={styles.controls}>
+                <ThemedText style={[styles.hint, { color: colors.error }]}>
+                  ❌ 合成失败
+                </ThemedText>
+                <ThemedText style={[styles.errorHint, { color: colors.textSecondary }]}>
+                  {compositeError || '请重试'}
+                </ThemedText>
+                <Pressable 
+                  style={[styles.viewScoreButton, { backgroundColor: colors.primary }]}
+                  onPress={resetComposite}
+                >
+                  <ThemedText style={styles.viewScoreButtonText}>重新录制</ThemedText>
+                </Pressable>
+              </View>
+            )}
+          </>
         )}
       </View>
 
@@ -980,6 +1381,79 @@ export default function DubbingScreen() {
                 </View>
               </ScrollView>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* 合成完成弹窗 */}
+      <Modal
+        visible={showCompositeModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowCompositeModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* 关闭按钮 */}
+              <Pressable 
+                style={styles.modalCloseButton}
+                onPress={() => setShowCompositeModal(false)}
+              >
+                <IconSymbol name="xmark" size={20} color={colors.textSecondary} />
+              </Pressable>
+
+              {/* 成功图标 */}
+              <View style={styles.compositeSuccessHeader}>
+                <View style={[styles.successIconContainer, { backgroundColor: colors.success + '20' }]}>
+                  <IconSymbol name="checkmark.circle.fill" size={48} color={colors.success} />
+                </View>
+                <ThemedText style={[styles.compositeSuccessTitle, { color: colors.text }]}>
+                  配音合成完成！
+                </ThemedText>
+                <ThemedText style={[styles.compositeSuccessSubtitle, { color: colors.textSecondary }]}>
+                  你的配音已经成功合成到视频中
+                </ThemedText>
+              </View>
+
+              {/* 预览视频 */}
+              {compositeVideoPath && (
+                <View style={styles.compositePreview}>
+                  <Video
+                    source={{ uri: `${API_BASE_URL}${compositeVideoPath}` }}
+                    style={styles.compositeVideo}
+                    resizeMode={ResizeMode.CONTAIN}
+                    useNativeControls={true}
+                  />
+                </View>
+              )}
+
+              {/* 操作按钮 */}
+              <View style={styles.modalActions}>
+                <Pressable 
+                  style={[styles.modalButton, { backgroundColor: colors.primary }]}
+                  onPress={() => {
+                    setShowCompositeModal(false);
+                    resetComposite();
+                  }}
+                >
+                  <ThemedText style={styles.modalButtonText}>再录一次</ThemedText>
+                </Pressable>
+                <Pressable 
+                  style={[styles.modalButton, { backgroundColor: colors.success }]}
+                  onPress={() => {
+                    setShowCompositeModal(false);
+                    router.back();
+                  }}
+                >
+                  <ThemedText style={styles.modalButtonText}>返回列表</ThemedText>
+                </Pressable>
+              </View>
+
+              <ThemedText style={[styles.compositeHint, { color: colors.textSecondary }]}>
+                你可以在"我的配音"中查看和下载所有录制的配音
+              </ThemedText>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1903,5 +2377,73 @@ const styles = StyleSheet.create({
   dictCloseBtnText: {
     fontSize: 16,
     fontWeight: '500',
+  },
+  // 模式切换样式
+  modeTabContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 12,
+    borderBottomWidth: 1,
+  },
+  modeTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 12,
+    gap: 6,
+  },
+  modeTabText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // 合成相关样式
+  errorHint: {
+    marginTop: 12,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  processingHint: {
+    marginTop: 8,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  compositeSuccessHeader: {
+    alignItems: 'center',
+    paddingTop: 16,
+    paddingBottom: 24,
+  },
+  successIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  compositeSuccessTitle: {
+    fontSize: 22,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  compositeSuccessSubtitle: {
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  compositePreview: {
+    marginBottom: 24,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  compositeVideo: {
+    width: '100%',
+    height: 200,
+  },
+  compositeHint: {
+    marginTop: 16,
+    fontSize: 12,
+    textAlign: 'center',
   },
 });

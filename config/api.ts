@@ -53,6 +53,18 @@ export const API_ENDPOINTS = {
   // 字典 API (独立服务)
   wordLookup: (word: string) => `http://english-dict.coding61.com/word/${encodeURIComponent(word.toLowerCase())}`,
   wordStatus: (word: string) => `http://english-dict.coding61.com/word/${encodeURIComponent(word.toLowerCase())}/status`,
+  
+  // 视频合成 API
+  compositeVideo: `${API_BASE_URL}/api/app/composite-video`,
+  compositeVideoStatus: (taskId: number) => `${API_BASE_URL}/api/app/composite-video?task_id=${taskId}`,
+  
+  // 用户配音 API
+  userDubbings: (userId: string) => `${API_BASE_URL}/api/app/user/${userId}/dubbings`,
+  publicDubbings: `${API_BASE_URL}/api/app/dubbings/public`,
+  updateDubbingPublic: (userId: string, dubbingId: number) => 
+    `${API_BASE_URL}/api/app/user/${userId}/dubbings/${dubbingId}/public`,
+  deleteDubbing: (userId: string, dubbingId: number) => 
+    `${API_BASE_URL}/api/app/user/${userId}/dubbings/${dubbingId}`,
 };
 
 // 调试用：打印当前 API 地址

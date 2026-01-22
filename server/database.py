@@ -163,6 +163,40 @@ class VocalRemovalTask(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class MediaCache(Base):
+    """媒体缓存（背景音、无声视频等中间产物）"""
+    __tablename__ = "media_cache"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cache_key = Column(String(500), unique=True, nullable=False, index=True)  # 如: "md5hash:background" 或 "md5hash:mute-video"
+    cache_type = Column(String(50), nullable=False)  # "background", "mute-video"
+    file_path = Column(String(500), nullable=False)  # 缓存文件路径
+    source_url = Column(String(1000), nullable=False)  # 原始视频URL
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserDubbing(Base):
+    """用户配音作品"""
+    __tablename__ = "user_dubbings"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(50), nullable=False, index=True)  # 用户ID
+    clip_path = Column(String(500), nullable=False)  # 原始片段路径
+    season_id = Column(String(50))  # 季ID
+    original_video_url = Column(String(1000), nullable=False)  # 原始视频URL
+    user_audio_path = Column(String(500))  # 用户上传的录音路径
+    composite_video_path = Column(String(500))  # 合成后的视频路径
+    status = Column(String(20), default="pending")  # pending, processing, completed, failed
+    error_message = Column(Text)  # 错误信息
+    is_public = Column(Boolean, default=True)  # 是否公开分享
+    original_text = Column(String(500))  # 原文（用于显示）
+    translation_cn = Column(String(500))  # 中文翻译（用于显示）
+    thumbnail = Column(String(500))  # 缩略图URL
+    duration = Column(Float, default=0)  # 时长
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # ===== 数据库操作 =====
 
 def migrate_db():
@@ -445,6 +479,111 @@ def delete_vocal_removal_task(db: Session, video_url: str) -> bool:
 def cleanup_failed_vocal_removal_tasks(db: Session) -> int:
     """清理所有失败的人声去除任务，返回删除的数量"""
     result = db.query(VocalRemovalTask).filter(VocalRemovalTask.status == "failed").delete()
+    db.commit()
+    return result
+
+
+# ===== 媒体缓存管理 =====
+def get_media_cache(db: Session, cache_key: str) -> Optional[MediaCache]:
+    """根据缓存key获取媒体缓存"""
+    return db.query(MediaCache).filter(MediaCache.cache_key == cache_key).first()
+
+
+def create_media_cache(db: Session, cache_key: str, cache_type: str, file_path: str, source_url: str) -> MediaCache:
+    """创建媒体缓存记录"""
+    cache = MediaCache(
+        cache_key=cache_key,
+        cache_type=cache_type,
+        file_path=file_path,
+        source_url=source_url
+    )
+    db.add(cache)
+    db.commit()
+    db.refresh(cache)
+    return cache
+
+
+def get_media_cache_by_url_and_type(db: Session, source_url: str, cache_type: str) -> Optional[MediaCache]:
+    """根据源URL和缓存类型获取媒体缓存"""
+    return db.query(MediaCache).filter(
+        MediaCache.source_url == source_url,
+        MediaCache.cache_type == cache_type
+    ).first()
+
+
+# ===== 用户配音管理 =====
+def create_user_dubbing(db: Session, **kwargs) -> UserDubbing:
+    """创建用户配音记录"""
+    dubbing = UserDubbing(**kwargs)
+    db.add(dubbing)
+    db.commit()
+    db.refresh(dubbing)
+    return dubbing
+
+
+def get_user_dubbing_by_id(db: Session, dubbing_id: int) -> Optional[UserDubbing]:
+    """根据ID获取用户配音"""
+    return db.query(UserDubbing).filter(UserDubbing.id == dubbing_id).first()
+
+
+def update_user_dubbing(db: Session, dubbing_id: int, **kwargs) -> Optional[UserDubbing]:
+    """更新用户配音记录"""
+    dubbing = db.query(UserDubbing).filter(UserDubbing.id == dubbing_id).first()
+    if dubbing:
+        for key, value in kwargs.items():
+            if hasattr(dubbing, key):
+                setattr(dubbing, key, value)
+        db.commit()
+        db.refresh(dubbing)
+    return dubbing
+
+
+def get_pending_user_dubbings(db: Session) -> list:
+    """获取所有待处理的用户配音任务"""
+    return db.query(UserDubbing).filter(UserDubbing.status == "pending").all()
+
+
+def get_user_dubbings_by_user(db: Session, user_id: str, offset: int = 0, limit: int = 20) -> list:
+    """获取用户的配音列表"""
+    return db.query(UserDubbing).filter(
+        UserDubbing.user_id == user_id
+    ).order_by(UserDubbing.created_at.desc()).offset(offset).limit(limit).all()
+
+
+def count_user_dubbings_by_user(db: Session, user_id: str) -> int:
+    """获取用户配音总数"""
+    return db.query(UserDubbing).filter(UserDubbing.user_id == user_id).count()
+
+
+def get_public_user_dubbings(db: Session, offset: int = 0, limit: int = 20) -> list:
+    """获取公开的配音列表"""
+    return db.query(UserDubbing).filter(
+        UserDubbing.is_public == True,
+        UserDubbing.status == "completed"
+    ).order_by(UserDubbing.created_at.desc()).offset(offset).limit(limit).all()
+
+
+def count_public_user_dubbings(db: Session) -> int:
+    """获取公开配音总数"""
+    return db.query(UserDubbing).filter(
+        UserDubbing.is_public == True,
+        UserDubbing.status == "completed"
+    ).count()
+
+
+def delete_user_dubbing(db: Session, dubbing_id: int, user_id: str) -> bool:
+    """删除用户配音（需要验证用户ID）"""
+    result = db.query(UserDubbing).filter(
+        UserDubbing.id == dubbing_id,
+        UserDubbing.user_id == user_id
+    ).delete()
+    db.commit()
+    return result > 0
+
+
+def cleanup_failed_user_dubbings(db: Session) -> int:
+    """清理所有失败的用户配音任务，返回删除的数量"""
+    result = db.query(UserDubbing).filter(UserDubbing.status == "failed").delete()
     db.commit()
     return result
 
