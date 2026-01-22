@@ -9,6 +9,7 @@ import httpx
 from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
 from urllib.parse import urljoin
@@ -467,8 +468,6 @@ def get_recommendations(
 
 
 # ===== 人声去除接口 =====
-
-from pydantic import BaseModel
 
 
 class VocalRemovalRequest(BaseModel):
