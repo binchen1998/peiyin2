@@ -48,11 +48,14 @@ app.add_middleware(
 # 挂载静态文件目录
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+VOCAL_REMOVED_DIR = os.path.join(os.path.dirname(__file__), "vocal_removed")
 os.makedirs(STATIC_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(VOCAL_REMOVED_DIR, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+app.mount("/vocal_removed", StaticFiles(directory=VOCAL_REMOVED_DIR), name="vocal_removed")
 
 # 注册路由
 app.include_router(admin_router)

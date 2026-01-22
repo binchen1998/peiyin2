@@ -25,9 +25,6 @@ export default function SeasonDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 从季节ID中提取季数
-  const seasonNumber = id?.split('-').pop()?.replace('s', '') || '1';
-
   useEffect(() => {
     loadEpisodes();
   }, [id]);
@@ -67,7 +64,7 @@ export default function SeasonDetailScreen() {
         </Pressable>
         <View style={styles.headerContent}>
           <ThemedText style={styles.headerTitle}>
-            {decodeURIComponent(cartoonName || '')} · 第{seasonNumber}季
+            {decodeURIComponent(cartoonName || '')}
           </ThemedText>
           <ThemedText style={styles.headerSubtitle}>
             共 {episodes.length} 集

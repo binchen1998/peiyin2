@@ -150,6 +150,19 @@ class RecommendedClip(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class VocalRemovalTask(Base):
+    """去除人声任务（缓存处理结果）"""
+    __tablename__ = "vocal_removal_tasks"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    video_url = Column(String(1000), nullable=False, unique=True, index=True)  # 原始视频URL（作为缓存key）
+    status = Column(String(20), default="pending")  # pending, processing, completed, failed
+    output_video_path = Column(String(500))  # 处理后的视频路径（无人声）
+    error_message = Column(Text)  # 错误信息
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # ===== 数据库操作 =====
 
 def migrate_db():
@@ -388,6 +401,38 @@ def add_recommended_clip(db: Session, clip_data: dict) -> RecommendedClip:
 def get_recommended_clips(db: Session) -> list:
     """获取所有推荐片段"""
     return db.query(RecommendedClip).order_by(RecommendedClip.sort_order).all()
+
+
+# ===== 人声去除任务管理 =====
+def get_vocal_removal_task(db: Session, video_url: str) -> Optional[VocalRemovalTask]:
+    """根据视频URL获取任务（缓存查询）"""
+    return db.query(VocalRemovalTask).filter(VocalRemovalTask.video_url == video_url).first()
+
+
+def create_vocal_removal_task(db: Session, video_url: str) -> VocalRemovalTask:
+    """创建新的人声去除任务"""
+    task = VocalRemovalTask(video_url=video_url, status="pending")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def update_vocal_removal_task(db: Session, task_id: int, **kwargs) -> Optional[VocalRemovalTask]:
+    """更新任务状态"""
+    task = db.query(VocalRemovalTask).filter(VocalRemovalTask.id == task_id).first()
+    if task:
+        for key, value in kwargs.items():
+            if hasattr(task, key):
+                setattr(task, key, value)
+        db.commit()
+        db.refresh(task)
+    return task
+
+
+def get_pending_vocal_removal_tasks(db: Session) -> list:
+    """获取所有待处理的任务"""
+    return db.query(VocalRemovalTask).filter(VocalRemovalTask.status == "pending").all()
 
 
 # 初始化示例数据

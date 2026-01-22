@@ -11,7 +11,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
 from urllib.parse import urljoin
 
-from database import get_db, Cartoon, Season, DubbingRecord, RecommendedClip, get_recommended_clips
+from database import (
+    get_db, Cartoon, Season, DubbingRecord, RecommendedClip, get_recommended_clips,
+    VocalRemovalTask, get_vocal_removal_task, create_vocal_removal_task
+)
 from schemas import (
     AppCartoonResponse, AppSeasonResponse, 
     AppEpisodeResponse, AppDubbingClipResponse,
@@ -455,3 +458,90 @@ def get_recommendations(
         "page_size": page_size,
         "total_pages": total_pages
     }
+
+
+# ===== 人声去除接口 =====
+
+from pydantic import BaseModel
+
+
+class VocalRemovalRequest(BaseModel):
+    """人声去除请求"""
+    video_url: str  # 视频URL，作为缓存key
+
+
+class VocalRemovalResponse(BaseModel):
+    """人声去除响应"""
+    status: str  # pending, processing, completed, failed
+    video_url: str  # 原始视频URL
+    output_video_path: Optional[str] = None  # 处理后的视频路径
+    error_message: Optional[str] = None  # 错误信息
+
+
+@router.post("/vocal-removal", response_model=VocalRemovalResponse)
+def request_vocal_removal(
+    request: VocalRemovalRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    请求去除视频人声
+    
+    接收一个视频 URL，后台 Worker 会：
+    1. 下载视频
+    2. 提取音频
+    3. 使用 Demucs 分离出无人声版本
+    4. 将无人声音频合成回视频
+    5. 缓存结果
+    
+    客户端可以轮询 GET /api/app/vocal-removal 查询处理状态
+    """
+    video_url = request.video_url
+    
+    # 检查缓存（是否已经处理过）
+    existing_task = get_vocal_removal_task(db, video_url)
+    
+    if existing_task:
+        # 如果已有任务，直接返回状态
+        return VocalRemovalResponse(
+            status=existing_task.status,
+            video_url=existing_task.video_url,
+            output_video_path=existing_task.output_video_path,
+            error_message=existing_task.error_message
+        )
+    
+    # 创建新任务
+    new_task = create_vocal_removal_task(db, video_url)
+    
+    return VocalRemovalResponse(
+        status=new_task.status,
+        video_url=new_task.video_url,
+        output_video_path=None,
+        error_message=None
+    )
+
+
+@router.get("/vocal-removal", response_model=VocalRemovalResponse)
+def get_vocal_removal_status(
+    video_url: str,
+    db: Session = Depends(get_db)
+):
+    """
+    查询人声去除任务状态（轮询接口）
+    
+    Args:
+        video_url: 原始视频URL（作为缓存key）
+    
+    Returns:
+        任务状态和结果
+    """
+    task = get_vocal_removal_task(db, video_url)
+    
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    return VocalRemovalResponse(
+        status=task.status,
+        video_url=task.video_url,
+        output_video_path=task.output_video_path,
+        error_message=task.error_message
+    )
