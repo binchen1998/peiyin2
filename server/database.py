@@ -297,7 +297,8 @@ def migrate_db():
 
 def init_db():
     """初始化数据库"""
-    Base.metadata.create_all(bind=engine)
+    # checkfirst=True 确保只创建不存在的表
+    Base.metadata.create_all(bind=engine, checkfirst=True)
     # 执行数据库迁移
     migrate_db()
 
