@@ -295,6 +295,24 @@ def migrate_db():
                 conn.execute(text("ALTER TABLE dubbing_records ADD COLUMN season_id VARCHAR(50)"))
                 conn.commit()
                 print("数据库迁移: 已添加 dubbing_records.season_id 列")
+    
+    # 检查 user_dubbings 表是否存在
+    if 'user_dubbings' in inspector.get_table_names():
+        columns = [col['name'] for col in inspector.get_columns('user_dubbings')]
+        
+        # 添加 user_video_path 列（如果不存在）- 视频配音模式用
+        if 'user_video_path' not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE user_dubbings ADD COLUMN user_video_path VARCHAR(500)"))
+                conn.commit()
+                print("数据库迁移: 已添加 user_dubbings.user_video_path 列")
+        
+        # 添加 mode 列（如果不存在）- 区分录音配音和视频配音
+        if 'mode' not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE user_dubbings ADD COLUMN mode VARCHAR(20) DEFAULT 'audio'"))
+                conn.commit()
+                print("数据库迁移: 已添加 user_dubbings.mode 列")
 
 
 def init_db():
