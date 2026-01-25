@@ -487,18 +487,20 @@ def merge_audio_files(audio1_path: str, audio2_path: str, output_path: str) -> b
 
 
 def stack_videos_vertical(top_video: str, bottom_video: str, output_path: str, 
-                          output_width: int = 720) -> bool:
+                          audio_path: str = None, output_width: int = 720) -> bool:
     """
     上下拼接两个视频，生成竖版视频
     
     - 顶部原视频：宽度720，高度自适应（保持原始宽高比，不裁剪，完整显示）
     - 底部用户视频：缩放并裁剪为正方形（720x720）
     - 两个视频紧挨着上下拼接
+    - 可指定单独的音频文件（混合了背景音和用户录音）
     
     Args:
         top_video: 上方视频路径（动画视频）
         bottom_video: 下方视频路径（用户录制的视频）
         output_path: 输出视频路径
+        audio_path: 可选的音频文件路径（如果提供则使用此音频）
         output_width: 输出宽度（默认720）
     
     Returns:
@@ -507,31 +509,52 @@ def stack_videos_vertical(top_video: str, bottom_video: str, output_path: str,
     try:
         square_size = output_width  # 720x720 用于用户视频
         
-        # 使用 ffmpeg 进行上下拼接
-        # 1. 顶部视频：缩放宽度为720，高度自适应（保持宽高比，不裁剪）
-        # 2. 底部视频：缩放并裁剪为720x720正方形
-        # 3. 垂直堆叠
-        # 4. 使用下方视频（用户录制）的音频
-        cmd = [
-            'ffmpeg', '-y',
-            '-i', top_video,
-            '-i', bottom_video,
-            '-filter_complex',
-            # 顶部视频：宽度720，高度自适应（保持宽高比，完整显示不裁剪）
-            f'[0:v]scale={output_width}:-2[top];'
-            # 底部视频：放大并居中裁剪为正方形
-            f'[1:v]scale={square_size}:{square_size}:force_original_aspect_ratio=increase,'
-            f'crop={square_size}:{square_size}[bottom];'
-            f'[top][bottom]vstack=inputs=2[v]',
-            '-map', '[v]',
-            '-map', '1:a?',  # 使用下方视频（用户录制）的音频
-            '-c:v', 'libx264',
-            '-preset', 'fast',
-            '-crf', '23',
-            '-c:a', 'aac',
-            '-shortest',
-            output_path
-        ]
+        # 构建 ffmpeg 命令
+        if audio_path and os.path.exists(audio_path):
+            # 使用单独的音频文件
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', top_video,
+                '-i', bottom_video,
+                '-i', audio_path,  # 第三个输入是音频
+                '-filter_complex',
+                # 顶部视频：宽度720，高度自适应（保持宽高比，完整显示不裁剪）
+                f'[0:v]scale={output_width}:-2[top];'
+                # 底部视频：放大并居中裁剪为正方形
+                f'[1:v]scale={square_size}:{square_size}:force_original_aspect_ratio=increase,'
+                f'crop={square_size}:{square_size}[bottom];'
+                f'[top][bottom]vstack=inputs=2[v]',
+                '-map', '[v]',
+                '-map', '2:a',  # 使用第三个输入（单独的音频文件）
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '23',
+                '-c:a', 'aac',
+                '-shortest',
+                output_path
+            ]
+        else:
+            # 使用下方视频的音频
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', top_video,
+                '-i', bottom_video,
+                '-filter_complex',
+                # 顶部视频：宽度720，高度自适应（保持宽高比，完整显示不裁剪）
+                f'[0:v]scale={output_width}:-2[top];'
+                # 底部视频：放大并居中裁剪为正方形
+                f'[1:v]scale={square_size}:{square_size}:force_original_aspect_ratio=increase,'
+                f'crop={square_size}:{square_size}[bottom];'
+                f'[top][bottom]vstack=inputs=2[v]',
+                '-map', '[v]',
+                '-map', '1:a?',  # 使用下方视频（用户录制）的音频
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '23',
+                '-c:a', 'aac',
+                '-shortest',
+                output_path
+            ]
         
         logger.info(f"执行视频拼接命令: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -767,26 +790,27 @@ async def process_video_dubbing_task(task: UserDubbing, work_dir: str) -> str:
     处理视频配音任务
     
     流程：
-    1. 下载原视频（去人声版本）
-    2. 获取用户录制的视频
-    3. 上下拼接成竖版720p视频
-    4. 返回最终视频路径
+    1. 获取背景音（去人声版本）和无声视频
+    2. 获取用户录制的视频，提取音频
+    3. 混合背景音和用户音频
+    4. 上下拼接视频，使用混合后的音频
+    5. 返回最终视频路径
     """
-    # 1. 获取或下载原视频（使用去人声缓存或下载原视频）
     url_hash = get_url_hash(task.original_video_url)
     video_ext = Path(task.original_video_url).suffix or '.mp4'
     
-    # 尝试使用去人声的缓存
-    cached_mute_path = os.path.join(MUTE_VIDEO_CACHE_DIR, f"{url_hash}_mute{video_ext}")
+    # 1. 获取背景音和无声视频
+    logger.info(f"获取背景音和无声视频: {task.original_video_url}")
+    bg_audio_path, mute_video_path = await get_or_create_background_and_mute_video(task.original_video_url)
     
-    if os.path.exists(cached_mute_path):
-        original_video_path = cached_mute_path
-        logger.info(f"使用缓存的无声视频: {cached_mute_path}")
-    else:
-        # 下载原视频
+    if not bg_audio_path or not mute_video_path:
+        # 如果没有缓存，下载原视频
+        logger.info("没有找到缓存，下载原视频...")
         original_video_path = os.path.join(work_dir, f"original{video_ext}")
         if not await download_video(task.original_video_url, original_video_path):
             raise Exception("下载原视频失败")
+        mute_video_path = original_video_path
+        bg_audio_path = None  # 没有背景音，只使用用户音频
     
     # 2. 获取用户录制的视频路径
     user_video_path_attr = getattr(task, 'user_video_path', None)
@@ -797,11 +821,36 @@ async def process_video_dubbing_task(task: UserDubbing, work_dir: str) -> str:
     if not os.path.exists(user_video_path):
         raise Exception(f"用户视频文件不存在: {user_video_path}")
     
-    # 3. 上下拼接成竖版视频
+    # 3. 从用户视频提取音频
+    user_audio_path = os.path.join(work_dir, "user_audio.aac")
+    extract_audio_cmd = [
+        'ffmpeg', '-y', '-i', user_video_path,
+        '-vn', '-acodec', 'aac', '-b:a', '128k',
+        user_audio_path
+    ]
+    result = subprocess.run(extract_audio_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.warning(f"提取用户音频失败: {result.stderr}")
+        user_audio_path = None
+    
+    # 4. 混合背景音和用户音频
+    final_audio_path = None
+    if bg_audio_path and user_audio_path:
+        # 两个音频都有，混合
+        final_audio_path = os.path.join(work_dir, "mixed_audio.aac")
+        if not merge_audio_files(user_audio_path, bg_audio_path, final_audio_path):
+            logger.warning("混合音频失败，只使用用户音频")
+            final_audio_path = user_audio_path
+    elif user_audio_path:
+        final_audio_path = user_audio_path
+    elif bg_audio_path:
+        final_audio_path = bg_audio_path
+    
+    # 5. 上下拼接成竖版视频
     output_filename = f"{task.user_id}_{task.id}_video_dubbing.mp4"
     output_video_path = os.path.join(USER_DUBBINGS_DIR, output_filename)
     
-    if not stack_videos_vertical(original_video_path, user_video_path, output_video_path):
+    if not stack_videos_vertical(mute_video_path, user_video_path, output_video_path, final_audio_path):
         raise Exception("视频拼接失败")
     
     return f"/user_dubbings/{output_filename}"

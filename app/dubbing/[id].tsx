@@ -2226,6 +2226,22 @@ export default function DubbingScreen() {
                       </ThemedText>
                     </View>
                   )}
+                  {/* 合成完成的覆盖层 */}
+                  {videoDubbingStatus === 'completed' && (
+                    <View style={styles.cameraOverlay}>
+                      <IconSymbol name="checkmark.circle.fill" size={48} color="#4CD964" />
+                      <ThemedText style={styles.cameraOverlayText}>
+                        合成完成！
+                      </ThemedText>
+                      <Pressable 
+                        style={[styles.videoDubbingButton, { backgroundColor: colors.primary, marginTop: 12 }]}
+                        onPress={() => setShowCompositeModal(true)}
+                      >
+                        <IconSymbol name="play.fill" size={20} color="#FFFFFF" />
+                        <ThemedText style={styles.videoDubbingButtonText}>查看视频</ThemedText>
+                      </Pressable>
+                    </View>
+                  )}
                 </View>
               ) : (
                 <View style={[styles.cameraPreview, styles.cameraPlaceholder, { backgroundColor: colors.backgroundSecondary }]}>
@@ -2261,44 +2277,6 @@ export default function DubbingScreen() {
                   <ThemedText style={[styles.videoDubbingHint, { color: colors.primary }]}>
                     ✓ 录制完成，点击选择操作
                   </ThemedText>
-                </Pressable>
-              </View>
-            )}
-
-            {/* 上传中 */}
-            {videoDubbingStatus === 'uploading' && (
-              <View style={styles.videoDubbingControls}>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <ThemedText style={[styles.videoDubbingHint, { color: colors.textSecondary }]}>
-                  正在上传...
-                </ThemedText>
-              </View>
-            )}
-
-            {/* 合成中 */}
-            {videoDubbingStatus === 'processing' && (
-              <View style={styles.videoDubbingControls}>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <ThemedText style={[styles.videoDubbingHint, { color: colors.textSecondary }]}>
-                  正在合成视频...
-                </ThemedText>
-                <ThemedText style={[styles.processingHint, { color: colors.textSecondary }]}>
-                  合成竖版720p视频，上方原视频，下方你的配音
-                </ThemedText>
-              </View>
-            )}
-
-            {/* 合成完成 */}
-            {videoDubbingStatus === 'completed' && (
-              <View style={styles.videoDubbingControls}>
-                <ThemedText style={[styles.videoDubbingHint, { color: colors.success }]}>
-                  ✅ 视频合成完成！
-                </ThemedText>
-                <Pressable 
-                  style={[styles.viewScoreButton, { backgroundColor: colors.primary }]}
-                  onPress={() => setShowCompositeModal(true)}
-                >
-                  <ThemedText style={styles.viewScoreButtonText}>查看合成视频</ThemedText>
                 </Pressable>
               </View>
             )}
