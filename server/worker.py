@@ -491,8 +491,8 @@ def stack_videos_vertical(top_video: str, bottom_video: str, output_path: str,
     """
     上下拼接两个视频，生成竖版视频
     
-    两个视频都拉伸为正方形（720x720），上下拼接成 720x1440 的视频
-    无黑边，视频会被拉伸填充
+    两个视频都缩放并居中裁剪为正方形（720x720），上下拼接成 720x1440 的视频
+    保持原始宽高比，通过放大和裁剪来填充，无黑边无拉伸
     
     Args:
         top_video: 上方视频路径（动画视频）
@@ -508,17 +508,22 @@ def stack_videos_vertical(top_video: str, bottom_video: str, output_path: str,
         square_size = output_width  # 720x720
         
         # 使用 ffmpeg 进行上下拼接
-        # 1. 将两个视频强制缩放为正方形（拉伸填充，无黑边）
-        # 2. 垂直堆叠
-        # 3. 使用下方视频（用户录制）的音频
+        # 1. 将两个视频缩放（保持宽高比，放大到能覆盖正方形）
+        # 2. 居中裁剪为正方形
+        # 3. 垂直堆叠
+        # 4. 使用下方视频（用户录制）的音频
         cmd = [
             'ffmpeg', '-y',
             '-i', top_video,
             '-i', bottom_video,
             '-filter_complex',
-            # 强制拉伸为正方形，不保持宽高比（无黑边）
-            f'[0:v]scale={square_size}:{square_size}:force_original_aspect_ratio=0[top];'
-            f'[1:v]scale={square_size}:{square_size}:force_original_aspect_ratio=0[bottom];'
+            # 放大并居中裁剪为正方形（保持宽高比，无拉伸）
+            # force_original_aspect_ratio=increase: 放大到覆盖目标区域
+            # crop: 居中裁剪到正方形
+            f'[0:v]scale={square_size}:{square_size}:force_original_aspect_ratio=increase,'
+            f'crop={square_size}:{square_size}[top];'
+            f'[1:v]scale={square_size}:{square_size}:force_original_aspect_ratio=increase,'
+            f'crop={square_size}:{square_size}[bottom];'
             f'[top][bottom]vstack=inputs=2[v]',
             '-map', '[v]',
             '-map', '1:a?',  # 使用下方视频（用户录制）的音频
