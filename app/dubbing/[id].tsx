@@ -18,7 +18,7 @@ import { ScoringResult, DubbingClip, WordScore } from '@/types';
 import { API_BASE_URL, API_ENDPOINTS, VOSK_SERVICE_URL, getStreamingVideoUrl, getVocalRemovedVideoUrl } from '@/config/api';
 import { getUserId } from '@/hooks/use-user-profile';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 type RecordingStatus = 'idle' | 'recording' | 'recorded' | 'uploading' | 'scored';
 
@@ -1710,6 +1710,20 @@ export default function DubbingScreen() {
           )}
         </Pressable>
         
+        {/* 视频配音模式下的文字覆盖层 */}
+        {dubbingMode === 'video' && clip.originalText && (
+          <View style={styles.videoTextOverlay}>
+            <ThemedText style={styles.videoOverlayText} numberOfLines={2}>
+              {clip.originalText}
+            </ThemedText>
+            {clip.translationCN && (
+              <ThemedText style={styles.videoOverlayTranslation} numberOfLines={1}>
+                {clip.translationCN}
+              </ThemedText>
+            )}
+          </View>
+        )}
+        
         {/* 进度条区域 - 暂停时显示，或录制/试听时始终显示 */}
         {videoDuration > 0 && (!isPlaying || compositeStatus === 'recording' || videoDubbingStatus === 'recording' || isPlayingRecording) && (
           <View style={styles.progressContainer}>
@@ -1745,55 +1759,56 @@ export default function DubbingScreen() {
         )}
       </View>
 
-      {/* 台词显示区域 */}
-      <View style={[styles.textSection, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-        <View style={styles.clipMeta}>
-          <View style={[styles.durationBadge, { backgroundColor: colors.backgroundSecondary }]}>
-            <ThemedText style={[styles.durationText, { color: colors.primary }]}>
-              ⏱️ {clip.duration.toFixed(1)}秒
+      {/* 台词显示区域 - 视频配音模式下隐藏 */}
+      {dubbingMode !== 'video' && (
+        <View style={[styles.textSection, styles.textSectionFixed, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <ScrollView 
+            style={styles.textScrollView}
+            contentContainerStyle={styles.textScrollContent}
+            showsVerticalScrollIndicator={true}
+          >
+            <View style={styles.originalTextContainer}>
+              <ThemedText style={[styles.quoteText, { color: colors.text }]}>"</ThemedText>
+              <View style={styles.wordsContainer}>
+                {splitTextToWords(clip.originalText).map((word, idx) => (
+                  <Pressable 
+                    key={idx} 
+                    onPress={() => lookupWord(word)}
+                    style={({ pressed }) => [
+                      styles.wordButton,
+                      pressed && styles.wordButtonPressed,
+                    ]}
+                  >
+                    <ThemedText style={[styles.wordText, { color: colors.text }]}>
+                      {word}
+                    </ThemedText>
+                  </Pressable>
+                ))}
+              </View>
+              <ThemedText style={[styles.quoteText, { color: colors.text }]}>"</ThemedText>
+            </View>
+            <ThemedText style={[styles.translationText, { color: colors.textSecondary }]}>
+              {clip.translationCN}
             </ThemedText>
-          </View>
-          
-          {/* 评分历史按钮 */}
-          {scoreHistory.length > 0 && (
-            <Pressable 
-              style={[styles.historyBadge, { backgroundColor: colors.primary + '20' }]}
-              onPress={() => setShowHistoryModal(true)}
-            >
-              <IconSymbol name="clock.arrow.circlepath" size={14} color={colors.primary} />
-              <ThemedText style={[styles.historyBadgeText, { color: colors.primary }]}>
-                历史 ({scoreHistory.length})
-              </ThemedText>
-            </Pressable>
-          )}
-        </View>
-        <View style={styles.originalTextContainer}>
-          <ThemedText style={[styles.quoteText, { color: colors.text }]}>"</ThemedText>
-          <View style={styles.wordsContainer}>
-            {splitTextToWords(clip.originalText).map((word, idx) => (
+            <ThemedText style={[styles.dictHint, { color: colors.textSecondary }]}>
+              点击单词可查询释义
+            </ThemedText>
+            
+            {/* 评分历史按钮 */}
+            {scoreHistory.length > 0 && (
               <Pressable 
-                key={idx} 
-                onPress={() => lookupWord(word)}
-                style={({ pressed }) => [
-                  styles.wordButton,
-                  pressed && styles.wordButtonPressed,
-                ]}
+                style={[styles.historyBadgeInline, { backgroundColor: colors.primary + '20' }]}
+                onPress={() => setShowHistoryModal(true)}
               >
-                <ThemedText style={[styles.wordText, { color: colors.text }]}>
-                  {word}
+                <IconSymbol name="clock.arrow.circlepath" size={14} color={colors.primary} />
+                <ThemedText style={[styles.historyBadgeText, { color: colors.primary }]}>
+                  查看历史记录 ({scoreHistory.length})
                 </ThemedText>
               </Pressable>
-            ))}
-          </View>
-          <ThemedText style={[styles.quoteText, { color: colors.text }]}>"</ThemedText>
+            )}
+          </ScrollView>
         </View>
-        <ThemedText style={[styles.translationText, { color: colors.textSecondary }]}>
-          {clip.translationCN}
-        </ThemedText>
-        <ThemedText style={[styles.dictHint, { color: colors.textSecondary }]}>
-          点击单词可查询释义
-        </ThemedText>
-      </View>
+      )}
 
       {/* 模式切换标签 */}
       <View style={[styles.modeTabContainer, { backgroundColor: colors.card, borderBottomColor: colors.cardBorder }]}>
@@ -2200,6 +2215,15 @@ export default function DubbingScreen() {
                     <View style={styles.cameraRecordingBadge}>
                       <View style={styles.recordingDotSmall} />
                       <ThemedText style={styles.cameraRecordingText}>REC</ThemedText>
+                    </View>
+                  )}
+                  {/* 上传中/合成中的覆盖层 */}
+                  {(videoDubbingStatus === 'uploading' || videoDubbingStatus === 'processing') && (
+                    <View style={styles.cameraOverlay}>
+                      <ActivityIndicator size="large" color="#FFFFFF" />
+                      <ThemedText style={styles.cameraOverlayText}>
+                        {videoDubbingStatus === 'uploading' ? '正在上传...' : '正在合成...'}
+                      </ThemedText>
                     </View>
                   )}
                 </View>
@@ -2922,6 +2946,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     opacity: 0.9,
   },
+  // 视频配音模式下的文字覆盖层
+  videoTextOverlay: {
+    position: 'absolute',
+    bottom: 40,
+    left: 12,
+    right: 12,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  videoOverlayText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  videoOverlayTranslation: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 4,
+  },
   progressContainer: {
     position: 'absolute',
     bottom: 0,
@@ -2968,6 +3016,27 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 16,
     borderWidth: 2,
+  },
+  textSectionFixed: {
+    height: height / 6,  // 固定为屏幕高度的 1/6
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  textScrollView: {
+    flex: 1,
+  },
+  textScrollContent: {
+    paddingBottom: 8,
+  },
+  historyBadgeInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginTop: 12,
+    gap: 6,
   },
   clipMeta: {
     flexDirection: 'row',
