@@ -1157,12 +1157,15 @@ export default function DubbingScreen() {
       setCompositeStatus('recording');
       console.log('[开始录制] 状态设为 recording');
       
-      // 将视频重置到开头并开始播放
+      // 将视频重置到开头并静音播放（避免背景声和录音冲突）
       if (videoRef.current) {
-        console.log('[开始录制] 准备播放视频...');
+        console.log('[开始录制] 准备静音播放视频...');
         console.log('[开始录制] 当前视频源应为本地文件:', vocalRemovedLocalUri);
         
         try {
+          console.log('[开始录制] 设置视频静音...');
+          await videoRef.current.setIsMutedAsync(true);  // 静音播放
+          
           console.log('[开始录制] 设置视频位置到 0...');
           await videoRef.current.setPositionAsync(0);
           console.log('[开始录制] 位置设置成功');
@@ -1221,9 +1224,10 @@ export default function DubbingScreen() {
     try {
       if (!recordingRef.current) return;
 
-      // 停止视频播放
+      // 停止视频播放并恢复声音
       if (videoRef.current) {
         await videoRef.current.pauseAsync();
+        await videoRef.current.setIsMutedAsync(false);  // 恢复声音
       }
 
       await recordingRef.current.stopAndUnloadAsync();
@@ -1293,9 +1297,10 @@ export default function DubbingScreen() {
       
       setVideoDubbingStatus('recording');
       
-      // 将视频重置到开头并开始播放
+      // 将视频重置到开头并静音播放（避免背景声和录音冲突）
       if (videoRef.current) {
-        console.log('[视频配音] 开始播放视频...');
+        console.log('[视频配音] 开始静音播放视频...');
+        await videoRef.current.setIsMutedAsync(true);  // 静音播放
         await videoRef.current.setPositionAsync(0);
         await videoRef.current.playAsync();
       }
@@ -1338,9 +1343,10 @@ export default function DubbingScreen() {
     console.log('[视频配音] 停止录制');
     
     try {
-      // 停止视频播放
+      // 停止视频播放并恢复声音
       if (videoRef.current) {
         await videoRef.current.pauseAsync();
+        await videoRef.current.setIsMutedAsync(false);  // 恢复声音
       }
       
       // 停止摄像头录制

@@ -487,37 +487,38 @@ def merge_audio_files(audio1_path: str, audio2_path: str, output_path: str) -> b
 
 
 def stack_videos_vertical(top_video: str, bottom_video: str, output_path: str, 
-                          output_width: int = 720, output_height: int = 1280) -> bool:
+                          output_width: int = 720) -> bool:
     """
     上下拼接两个视频，生成竖版视频
     
+    两个视频都拉伸为正方形（720x720），上下拼接成 720x1440 的视频
+    无黑边，视频会被拉伸填充
+    
     Args:
-        top_video: 上方视频路径
-        bottom_video: 下方视频路径
+        top_video: 上方视频路径（动画视频）
+        bottom_video: 下方视频路径（用户录制的视频）
         output_path: 输出视频路径
-        output_width: 输出宽度（默认720p竖版）
-        output_height: 输出高度（默认1280）
+        output_width: 输出宽度（默认720）
     
     Returns:
         是否成功
     """
     try:
-        # 计算每个视频的高度（上下各占一半）
-        half_height = output_height // 2
+        # 每个视频都是正方形，宽高相同
+        square_size = output_width  # 720x720
         
         # 使用 ffmpeg 进行上下拼接
-        # 1. 将两个视频缩放到相同宽度，高度为总高度的一半
+        # 1. 将两个视频强制缩放为正方形（拉伸填充，无黑边）
         # 2. 垂直堆叠
-        # 3. 使用上方视频的音频
+        # 3. 使用下方视频（用户录制）的音频
         cmd = [
             'ffmpeg', '-y',
             '-i', top_video,
             '-i', bottom_video,
             '-filter_complex',
-            f'[0:v]scale={output_width}:{half_height}:force_original_aspect_ratio=decrease,'
-            f'pad={output_width}:{half_height}:(ow-iw)/2:(oh-ih)/2:black[top];'
-            f'[1:v]scale={output_width}:{half_height}:force_original_aspect_ratio=decrease,'
-            f'pad={output_width}:{half_height}:(ow-iw)/2:(oh-ih)/2:black[bottom];'
+            # 强制拉伸为正方形，不保持宽高比（无黑边）
+            f'[0:v]scale={square_size}:{square_size}:force_original_aspect_ratio=0[top];'
+            f'[1:v]scale={square_size}:{square_size}:force_original_aspect_ratio=0[bottom];'
             f'[top][bottom]vstack=inputs=2[v]',
             '-map', '[v]',
             '-map', '1:a?',  # 使用下方视频（用户录制）的音频
@@ -536,7 +537,7 @@ def stack_videos_vertical(top_video: str, bottom_video: str, output_path: str,
             logger.error(f"视频拼接失败: {result.stderr}")
             return False
         
-        logger.info(f"视频拼接完成: {output_path}")
+        logger.info(f"视频拼接完成: {output_path} (720x1440)")
         return True
         
     except Exception as e:
