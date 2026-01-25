@@ -593,12 +593,19 @@ class UserDubbingResponse(BaseModel):
     created_at: str
 
 
+# 用户视频存储目录（视频配音模式）
+USER_VIDEOS_DIR = os.path.join(os.path.dirname(__file__), "user_videos")
+os.makedirs(USER_VIDEOS_DIR, exist_ok=True)
+
+
 @router.post("/composite-video", response_model=CompositeVideoResponse)
 async def create_composite_video(
-    audio: UploadFile = File(...),
+    audio: UploadFile = File(None),  # 录音配音模式
+    user_video: UploadFile = File(None),  # 视频配音模式
     video_url: str = Form(...),
     clip_path: str = Form(...),
     user_id: str = Form(...),
+    mode: str = Form("audio"),  # audio 或 video
     season_id: str = Form(None),
     original_text: str = Form(None),
     translation_cn: str = Form(None),
@@ -609,23 +616,44 @@ async def create_composite_video(
     """
     提交视频合成请求
     
-    接收用户录音和原始视频URL，后台 Worker 会：
-    1. 获取或创建背景音（从原视频分离人声）
-    2. 获取或创建无声视频
-    3. 合并用户配音和背景音
-    4. 将合成音频与无声视频合成
-    5. 返回最终视频路径
+    支持两种模式:
+    1. audio (录音配音模式): 接收用户录音，合成到原视频
+    2. video (视频配音模式): 接收用户录制的视频，上下拼接成竖版720p视频
     
     客户端可以轮询 GET /api/app/composite-video 查询处理状态
     """
     try:
-        # 保存用户上传的音频文件
-        audio_filename = f"{uuid.uuid4().hex}_{audio.filename or 'recording.m4a'}"
-        audio_path = os.path.join(USER_AUDIO_DIR, audio_filename)
+        user_audio_path = None
+        user_video_path = None
         
-        content = await audio.read()
-        with open(audio_path, 'wb') as f:
-            f.write(content)
+        if mode == "video":
+            # 视频配音模式
+            if not user_video:
+                raise HTTPException(status_code=400, detail="视频配音模式需要上传视频文件")
+            
+            # 保存用户上传的视频文件
+            video_filename = f"{uuid.uuid4().hex}_{user_video.filename or 'camera.mp4'}"
+            video_path = os.path.join(USER_VIDEOS_DIR, video_filename)
+            
+            content = await user_video.read()
+            with open(video_path, 'wb') as f:
+                f.write(content)
+            
+            user_video_path = f"/user_videos/{video_filename}"
+        else:
+            # 录音配音模式
+            if not audio:
+                raise HTTPException(status_code=400, detail="录音配音模式需要上传音频文件")
+            
+            # 保存用户上传的音频文件
+            audio_filename = f"{uuid.uuid4().hex}_{audio.filename or 'recording.m4a'}"
+            audio_path = os.path.join(USER_AUDIO_DIR, audio_filename)
+            
+            content = await audio.read()
+            with open(audio_path, 'wb') as f:
+                f.write(content)
+            
+            user_audio_path = f"/user_audio/{audio_filename}"
         
         # 创建配音任务记录
         dubbing = create_user_dubbing(
@@ -634,7 +662,9 @@ async def create_composite_video(
             clip_path=clip_path,
             season_id=season_id,
             original_video_url=video_url,
-            user_audio_path=f"/user_audio/{audio_filename}",
+            user_audio_path=user_audio_path,
+            user_video_path=user_video_path,
+            mode=mode,
             status="pending",
             original_text=original_text,
             translation_cn=translation_cn,
@@ -649,6 +679,8 @@ async def create_composite_video(
             error_message=None
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建任务失败: {str(e)}")
 

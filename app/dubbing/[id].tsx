@@ -3,6 +3,7 @@ import { StyleSheet, View, Pressable, Dimensions, ActivityIndicator, Platform, M
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Audio } from 'expo-av';
+import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 
@@ -14,24 +15,32 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { fetchClipByPath } from '@/data/mock-data';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ScoringResult, DubbingClip, WordScore } from '@/types';
-import { API_BASE_URL, API_ENDPOINTS, VOSK_SERVICE_URL, getStreamingVideoUrl } from '@/config/api';
+import { API_BASE_URL, API_ENDPOINTS, VOSK_SERVICE_URL, getStreamingVideoUrl, getVocalRemovedVideoUrl } from '@/config/api';
 import { getUserId } from '@/hooks/use-user-profile';
 
 const { width } = Dimensions.get('window');
 
 type RecordingStatus = 'idle' | 'recording' | 'recorded' | 'uploading' | 'scored';
 
-// 配音模式：评分模式 vs 录制模式
-type DubbingMode = 'score' | 'record';
+// 配音模式：评分模式 vs 录制模式 vs 视频配音模式
+type DubbingMode = 'score' | 'record' | 'video';
 
 // 合成状态
-type CompositeStatus = 'idle' | 'recording' | 'recorded' | 'uploading' | 'processing' | 'completed' | 'failed';
+type CompositeStatus = 'idle' | 'preparing' | 'recording' | 'recorded' | 'uploading' | 'processing' | 'completed' | 'failed';
 
 // 合成任务响应
 interface CompositeVideoResponse {
   task_id: number;
   status: string;
   composite_video_path: string | null;
+  error_message: string | null;
+}
+
+// 人声去除任务响应
+interface VocalRemovalResponse {
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  video_url: string;
+  output_video_path: string | null;
   error_message: string | null;
 }
 
@@ -144,8 +153,21 @@ export default function DubbingScreen() {
   const [showCompositeModal, setShowCompositeModal] = useState(false);
   const compositePollingRef = useRef<NodeJS.Timeout | null>(null);
   
+  // 去人声视频相关状态
+  const [vocalRemovedVideoUrl, setVocalRemovedVideoUrl] = useState<string | null>(null);
+  const [vocalRemovedLocalUri, setVocalRemovedLocalUri] = useState<string | null>(null); // 本地缓存路径
+  const [vocalRemovalStatus, setVocalRemovalStatus] = useState<'idle' | 'pending' | 'processing' | 'downloading' | 'completed' | 'failed'>('idle');
+  const vocalRemovalPollingRef = useRef<NodeJS.Timeout | null>(null);
+  
   // 下载状态
   const [downloading, setDownloading] = useState(false);
+
+  // 视频配音相关状态
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const cameraRef = useRef<CameraView>(null);
+  const [cameraRecordingUri, setCameraRecordingUri] = useState<string | null>(null);
+  const [videoDubbingStatus, setVideoDubbingStatus] = useState<'idle' | 'recording' | 'recorded' | 'uploading' | 'processing' | 'completed' | 'failed'>('idle');
+  const [showVideoDubbingConfirm, setShowVideoDubbingConfirm] = useState(false); // 录制完成确认对话框
 
   // 进度条宽度
   const progressBarWidth = width - 32;
@@ -454,11 +476,47 @@ export default function DubbingScreen() {
         await videoRef.current.pauseAsync();
       }
 
-      // 确保音频模式正确
+      // 确保之前的录音实例已被释放
+      if (recordingRef.current) {
+        try {
+          await recordingRef.current.stopAndUnloadAsync();
+        } catch (e) {
+          // 忽略错误，可能已经被释放
+        }
+        recordingRef.current = null;
+      }
+
+      // 确保之前的播放实例已被释放
+      if (playbackSoundRef.current) {
+        try {
+          await playbackSoundRef.current.unloadAsync();
+        } catch (e) {
+          // 忽略错误
+        }
+        playbackSoundRef.current = null;
+      }
+
+      // 先重置音频模式
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
+      });
+
+      // 等待一小段时间让 iOS 音频会话稳定
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // 再设置为录音模式
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
       });
+
+      // 再等待一小段时间
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       const { recording: newRecording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
@@ -469,6 +527,16 @@ export default function DubbingScreen() {
     } catch (err) {
       console.error('开始录音失败:', err);
       setError('开始录音失败，请重试');
+      
+      // 尝试重置音频模式
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+        });
+      } catch (e) {
+        // 忽略
+      }
     }
   };
 
@@ -482,10 +550,28 @@ export default function DubbingScreen() {
       recordingRef.current = null;
       setRecordingUri(uri);
       setRecordingStatus('recorded');
+      
+      // 重要：停止录音后重置音频模式为播放模式
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
+      });
     } catch (err) {
       console.error('停止录音失败:', err);
       setError('停止录音失败，请重试');
       setRecordingStatus('idle');
+      
+      // 尝试重置音频模式
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+        });
+      } catch (e) {
+        // 忽略
+      }
     }
   };
 
@@ -499,6 +585,11 @@ export default function DubbingScreen() {
         await playbackSoundRef.current.unloadAsync();
         playbackSoundRef.current = null;
         setIsPlayingRecording(false);
+        
+        // 同时停止视频
+        if (videoRef.current) {
+          await videoRef.current.pauseAsync();
+        }
         return;
       }
 
@@ -511,15 +602,26 @@ export default function DubbingScreen() {
         shouldDuckAndroid: true,
       });
 
+      // 将视频重置到开头
+      if (videoRef.current) {
+        await videoRef.current.setPositionAsync(0);
+      }
+
       const { sound } = await Audio.Sound.createAsync(
         { uri: recordingUri },
         { shouldPlay: true },
-        (status) => {
+        async (status) => {
           if (status.isLoaded && status.didJustFinish) {
             // 播放完成
             setIsPlayingRecording(false);
             sound.unloadAsync();
             playbackSoundRef.current = null;
+            
+            // 停止视频
+            if (videoRef.current) {
+              await videoRef.current.pauseAsync();
+            }
+            
             // 切回录音模式
             Audio.setAudioModeAsync({
               allowsRecordingIOS: true,
@@ -531,6 +633,12 @@ export default function DubbingScreen() {
       
       playbackSoundRef.current = sound;
       setIsPlayingRecording(true);
+      
+      // 同时播放视频（静音，因为要听自己的录音）
+      if (videoRef.current) {
+        await videoRef.current.setIsMutedAsync(true);
+        await videoRef.current.playAsync();
+      }
     } catch (err) {
       console.error('播放录音失败:', err);
       setError('播放录音失败');
@@ -639,10 +747,24 @@ export default function DubbingScreen() {
       // 关闭弹窗
       setShowScoreModal(false);
       
+      // 释放录音实例
+      if (recordingRef.current) {
+        try {
+          await recordingRef.current.stopAndUnloadAsync();
+        } catch (e) {
+          // 忽略
+        }
+        recordingRef.current = null;
+      }
+      
       // 停止播放
       if (playbackSoundRef.current) {
-        await playbackSoundRef.current.stopAsync();
-        await playbackSoundRef.current.unloadAsync();
+        try {
+          await playbackSoundRef.current.stopAsync();
+          await playbackSoundRef.current.unloadAsync();
+        } catch (e) {
+          // 忽略
+        }
         playbackSoundRef.current = null;
         setIsPlayingRecording(false);
       }
@@ -651,10 +773,12 @@ export default function DubbingScreen() {
       setScoringResult(null);
       setRecordingStatus('idle');
       
-      // 切回录音模式
+      // 重置为播放模式（下次录音时再切换到录音模式）
       await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
+        allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
       });
     } catch (err) {
       console.error('重置录音失败:', err);
@@ -682,68 +806,411 @@ export default function DubbingScreen() {
   // ===== 跟读录制模式相关函数 =====
   
   // 切换模式
-  const switchMode = (mode: DubbingMode) => {
+  const switchMode = async (mode: DubbingMode) => {
     if (mode === dubbingMode) return;
     
     // 切换前重置状态
-    resetRecording();
-    resetComposite();
+    await resetRecording();
+    await resetComposite();
+    await resetVideoDubbing();
     setDubbingMode(mode);
+    
+    // 切换到录制模式时，自动开始准备去人声视频
+    if ((mode === 'record' || mode === 'video') && clip) {
+      prepareVocalRemovedVideoInBackground();
+    }
+    
+    // 切换到视频配音模式时，请求摄像头权限
+    if (mode === 'video' && !cameraPermission?.granted) {
+      requestCameraPermission();
+    }
+  };
+  
+  // 重置视频配音状态
+  const resetVideoDubbing = async () => {
+    setCameraRecordingUri(null);
+    setVideoDubbingStatus('idle');
+    setShowVideoDubbingConfirm(false);
+    
+    // 重置音频模式为播放模式
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
+      });
+    } catch (e) {
+      // 忽略
+    }
+  };
+  
+  // 下载视频到本地
+  const downloadVideoToLocal = async (remoteUrl: string): Promise<string> => {
+    console.log('[下载视频] 开始下载:', remoteUrl);
+    
+    // 生成本地文件名
+    const fileName = `vocal_removed_${Date.now()}.mp4`;
+    const localUri = `${FileSystem.cacheDirectory}${fileName}`;
+    
+    console.log('[下载视频] 目标路径:', localUri);
+    
+    try {
+      const downloadResult = await FileSystem.downloadAsync(remoteUrl, localUri);
+      
+      console.log('[下载视频] 下载结果:', {
+        status: downloadResult.status,
+        uri: downloadResult.uri,
+        headers: downloadResult.headers,
+      });
+      
+      if (downloadResult.status !== 200) {
+        throw new Error(`下载失败，状态码: ${downloadResult.status}`);
+      }
+      
+      // 检查文件是否存在
+      const fileInfo = await FileSystem.getInfoAsync(downloadResult.uri);
+      console.log('[下载视频] 文件信息:', fileInfo);
+      
+      if (!fileInfo.exists) {
+        throw new Error('下载的文件不存在');
+      }
+      
+      console.log('[下载视频] 下载成功:', downloadResult.uri);
+      return downloadResult.uri;
+    } catch (err) {
+      console.error('[下载视频] 下载失败:', err);
+      throw err;
+    }
+  };
+
+  // 后台准备去人声视频（不阻塞 UI）
+  const prepareVocalRemovedVideoInBackground = async () => {
+    console.log('[准备视频] 开始准备去人声视频');
+    
+    if (!clip) {
+      console.log('[准备视频] clip 为空，跳过');
+      return;
+    }
+    
+    // 如果已经有本地缓存的视频，不需要再准备
+    if (vocalRemovedLocalUri && vocalRemovalStatus === 'completed') {
+      console.log('[准备视频] 已有本地缓存，跳过:', vocalRemovedLocalUri);
+      return;
+    }
+    
+    // 如果正在处理中，不要重复请求
+    if (vocalRemovalStatus === 'pending' || vocalRemovalStatus === 'processing' || vocalRemovalStatus === 'downloading') {
+      console.log('[准备视频] 正在处理中，跳过');
+      return;
+    }
+    
+    setVocalRemovalStatus('pending');
+    console.log('[准备视频] 状态设为 pending');
+    
+    try {
+      // 请求去人声处理
+      console.log('[准备视频] 请求去人声处理:', clip.videoUrl);
+      const result = await requestVocalRemoval(clip.videoUrl);
+      console.log('[准备视频] 服务器响应:', result);
+      
+      let remoteUrl: string;
+      
+      if (result.status === 'completed' && result.output_video_path) {
+        // 已经处理过，直接使用缓存
+        remoteUrl = getVocalRemovedVideoUrl(result.output_video_path);
+        console.log('[准备视频] 服务器已有缓存:', remoteUrl);
+      } else if (result.status === 'pending' || result.status === 'processing') {
+        // 需要等待处理
+        setVocalRemovalStatus('processing');
+        console.log('[准备视频] 等待服务器处理...');
+        remoteUrl = await pollVocalRemovalStatus(clip.videoUrl);
+        console.log('[准备视频] 服务器处理完成:', remoteUrl);
+      } else {
+        throw new Error(result.error_message || '处理失败');
+      }
+      
+      // 下载到本地
+      setVocalRemovalStatus('downloading');
+      console.log('[准备视频] 开始下载到本地...');
+      const localUri = await downloadVideoToLocal(remoteUrl);
+      
+      setVocalRemovedVideoUrl(remoteUrl);
+      setVocalRemovedLocalUri(localUri);
+      setVocalRemovalStatus('completed');
+      console.log('[准备视频] 完成! 本地路径:', localUri);
+      
+    } catch (err: any) {
+      console.error('[准备视频] 失败:', err);
+      setVocalRemovalStatus('failed');
+      setCompositeError(`准备视频失败: ${err.message}`);
+    }
   };
 
   // 重置合成状态
-  const resetComposite = () => {
+  const resetComposite = async () => {
+    // 释放录音实例
+    if (recordingRef.current) {
+      try {
+        await recordingRef.current.stopAndUnloadAsync();
+      } catch (e) {
+        // 忽略
+      }
+      recordingRef.current = null;
+    }
+    
+    // 释放播放实例
+    if (playbackSoundRef.current) {
+      try {
+        await playbackSoundRef.current.unloadAsync();
+      } catch (e) {
+        // 忽略
+      }
+      playbackSoundRef.current = null;
+    }
+    
     setCompositeStatus('idle');
     setCompositeTaskId(null);
     setCompositeVideoPath(null);
     setCompositeError(null);
     setShowCompositeModal(false);
+    setRecordingUri(null);
+    setIsPlayingRecording(false);
     
-    // 清除轮询
+    // 清除合成轮询
     if (compositePollingRef.current) {
       clearInterval(compositePollingRef.current);
       compositePollingRef.current = null;
     }
+    
+    // 清除去人声轮询
+    if (vocalRemovalPollingRef.current) {
+      clearInterval(vocalRemovalPollingRef.current);
+      vocalRemovalPollingRef.current = null;
+    }
+    
+    // 重置音频模式为播放模式
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
+      });
+    } catch (e) {
+      // 忽略
+    }
+  };
+
+  // 请求去人声视频
+  const requestVocalRemoval = async (videoUrl: string): Promise<VocalRemovalResponse> => {
+    const response = await fetch(API_ENDPOINTS.vocalRemoval, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ video_url: videoUrl }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`请求失败: ${response.status}`);
+    }
+    
+    return response.json();
+  };
+
+  // 查询去人声任务状态
+  const checkVocalRemovalStatus = async (videoUrl: string): Promise<VocalRemovalResponse> => {
+    const response = await fetch(API_ENDPOINTS.vocalRemovalStatus(videoUrl));
+    
+    if (!response.ok) {
+      throw new Error(`查询失败: ${response.status}`);
+    }
+    
+    return response.json();
+  };
+
+  // 轮询去人声任务状态
+  const pollVocalRemovalStatus = (videoUrl: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      let pollCount = 0;
+      const maxPolls = 120; // 最多轮询2分钟
+
+      vocalRemovalPollingRef.current = setInterval(async () => {
+        pollCount++;
+        
+        if (pollCount > maxPolls) {
+          if (vocalRemovalPollingRef.current) {
+            clearInterval(vocalRemovalPollingRef.current);
+            vocalRemovalPollingRef.current = null;
+          }
+          setVocalRemovalStatus('failed');
+          reject(new Error('处理超时，请稍后重试'));
+          return;
+        }
+
+        try {
+          const result = await checkVocalRemovalStatus(videoUrl);
+
+          if (result.status === 'completed' && result.output_video_path) {
+            if (vocalRemovalPollingRef.current) {
+              clearInterval(vocalRemovalPollingRef.current);
+              vocalRemovalPollingRef.current = null;
+            }
+            setVocalRemovalStatus('completed');
+            const fullUrl = getVocalRemovedVideoUrl(result.output_video_path);
+            setVocalRemovedVideoUrl(fullUrl);
+            resolve(fullUrl);
+          } else if (result.status === 'failed') {
+            if (vocalRemovalPollingRef.current) {
+              clearInterval(vocalRemovalPollingRef.current);
+              vocalRemovalPollingRef.current = null;
+            }
+            setVocalRemovalStatus('failed');
+            reject(new Error(result.error_message || '处理失败'));
+          }
+          // pending 或 processing 状态继续轮询
+        } catch (err) {
+          console.error('轮询去人声状态失败:', err);
+        }
+      }, 1000);
+    });
   };
 
   // 开始跟读录制（视频播放 + 录音同步）
   const startFollowRecording = async () => {
+    console.log('[开始录制] ========== 开始 ==========');
+    console.log('[开始录制] vocalRemovalStatus:', vocalRemovalStatus);
+    console.log('[开始录制] vocalRemovedLocalUri:', vocalRemovedLocalUri);
+    console.log('[开始录制] vocalRemovedVideoUrl:', vocalRemovedVideoUrl);
+    console.log('[开始录制] videoRef.current:', !!videoRef.current);
+    
     try {
       setError(null);
       setCompositeError(null);
       
+      // 检查去人声视频是否准备好（使用本地缓存）
+      if (!vocalRemovedLocalUri || vocalRemovalStatus !== 'completed') {
+        console.log('[开始录制] 视频还在准备中');
+        setCompositeError('视频还在准备中，请稍候');
+        return;
+      }
+      
+      console.log('[开始录制] 视频准备完成，开始设置录音...');
+      
+      // 确保之前的录音实例已被释放
+      if (recordingRef.current) {
+        console.log('[开始录制] 释放之前的录音实例...');
+        try {
+          await recordingRef.current.stopAndUnloadAsync();
+        } catch (e) {
+          console.log('[开始录制] 释放录音实例错误（忽略）:', e);
+        }
+        recordingRef.current = null;
+      }
+
+      // 确保之前的播放实例已被释放
+      if (playbackSoundRef.current) {
+        console.log('[开始录制] 释放之前的播放实例...');
+        try {
+          await playbackSoundRef.current.unloadAsync();
+        } catch (e) {
+          console.log('[开始录制] 释放播放实例错误（忽略）:', e);
+        }
+        playbackSoundRef.current = null;
+      }
+
+      // 先重置音频模式
+      console.log('[开始录制] 重置音频模式...');
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
+      });
+
+      // 等待一小段时间让 iOS 音频会话稳定
+      console.log('[开始录制] 等待 100ms...');
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // 设置录音模式
+      console.log('[开始录制] 设置录音模式...');
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
       });
 
+      // 再等待一小段时间
+      console.log('[开始录制] 等待 100ms...');
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // 创建录音
+      console.log('[开始录制] 创建录音...');
       const { recording: newRecording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
+      console.log('[开始录制] 录音创建成功');
       
       recordingRef.current = newRecording;
       setCompositeStatus('recording');
+      console.log('[开始录制] 状态设为 recording');
       
       // 将视频重置到开头并开始播放
       if (videoRef.current) {
-        await videoRef.current.setPositionAsync(0);
-        await videoRef.current.playAsync();
+        console.log('[开始录制] 准备播放视频...');
+        console.log('[开始录制] 当前视频源应为本地文件:', vocalRemovedLocalUri);
+        
+        try {
+          console.log('[开始录制] 设置视频位置到 0...');
+          await videoRef.current.setPositionAsync(0);
+          console.log('[开始录制] 位置设置成功');
+          
+          console.log('[开始录制] 调用 playAsync...');
+          const playbackStatus = await videoRef.current.playAsync();
+          console.log('[开始录制] playAsync 返回:', playbackStatus);
+        } catch (videoErr) {
+          console.error('[开始录制] 视频播放错误:', videoErr);
+          throw videoErr;
+        }
+      } else {
+        console.error('[开始录制] videoRef.current 为空！');
       }
+      
+      console.log('[开始录制] ========== 完成 ==========');
     } catch (err) {
-      console.error('开始跟读录制失败:', err);
+      console.error('[开始录制] 失败:', err);
       setError('开始录制失败，请重试');
+      setCompositeStatus('idle');
+      
+      // 尝试重置音频模式
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+        });
+      } catch (e) {
+        // 忽略
+      }
     }
   };
 
   // 处理视频播放状态更新（用于跟读模式）
   const handleFollowPlaybackStatus = (status: AVPlaybackStatus) => {
+    // 调试日志
+    if (status.isLoaded) {
+      console.log('[视频状态] isPlaying:', status.isPlaying, 'position:', status.positionMillis, 'duration:', status.durationMillis);
+    } else {
+      console.log('[视频状态] 未加载或出错:', status);
+    }
+    
     handlePlaybackStatusUpdate(status);
     
     // 如果是跟读录制模式且视频播放完成，自动停止录音
     if (dubbingMode === 'record' && compositeStatus === 'recording') {
       if (status.isLoaded && status.didJustFinish) {
+        console.log('[视频状态] 视频播放完成，停止录音');
         stopFollowRecording();
       }
     }
@@ -765,10 +1232,220 @@ export default function DubbingScreen() {
       recordingRef.current = null;
       setRecordingUri(uri);
       setCompositeStatus('recorded');
+      
+      // 重要：停止录音后重置音频模式为播放模式
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
+      });
     } catch (err) {
       console.error('停止跟读录制失败:', err);
       setError('停止录制失败，请重试');
       setCompositeStatus('idle');
+      
+      // 尝试重置音频模式
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+        });
+      } catch (e) {
+        // 忽略
+      }
+    }
+  };
+
+  // ===== 视频配音模式相关函数 =====
+  
+  // 开始视频配音录制（摄像头录制 + 视频播放同步）
+  const startVideoDubbingRecording = async () => {
+    console.log('[视频配音] ========== 开始录制 ==========');
+    
+    if (!cameraRef.current) {
+      console.error('[视频配音] cameraRef 为空');
+      setCompositeError('摄像头未准备好');
+      return;
+    }
+    
+    if (!vocalRemovedLocalUri || vocalRemovalStatus !== 'completed') {
+      console.log('[视频配音] 视频还在准备中');
+      setCompositeError('视频还在准备中，请稍候');
+      return;
+    }
+    
+    try {
+      setError(null);
+      setCompositeError(null);
+      
+      // 重要：先配置音频会话，允许同时播放和录制
+      console.log('[视频配音] 配置音频会话...');
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,  // 允许录制
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
+      });
+      
+      // 短暂延迟等待音频会话激活
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      setVideoDubbingStatus('recording');
+      
+      // 将视频重置到开头并开始播放
+      if (videoRef.current) {
+        console.log('[视频配音] 开始播放视频...');
+        await videoRef.current.setPositionAsync(0);
+        await videoRef.current.playAsync();
+      }
+      
+      // 开始摄像头录制
+      console.log('[视频配音] 开始摄像头录制...');
+      const videoRecording = await cameraRef.current.recordAsync({
+        maxDuration: Math.ceil((clip?.duration || 10) + 1), // 比视频长度多1秒
+      });
+      
+      console.log('[视频配音] 摄像头录制完成:', videoRecording);
+      
+      if (videoRecording?.uri) {
+        setCameraRecordingUri(videoRecording.uri);
+        setVideoDubbingStatus('recorded');
+        // 自动弹出确认对话框
+        setShowVideoDubbingConfirm(true);
+      } else {
+        throw new Error('录制失败，未获取到视频文件');
+      }
+    } catch (err) {
+      console.error('[视频配音] 录制失败:', err);
+      setCompositeError('录制失败，请重试');
+      setVideoDubbingStatus('idle');
+      
+      // 重置音频模式
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+        });
+      } catch (e) {
+        // 忽略
+      }
+    }
+  };
+  
+  // 停止视频配音录制
+  const stopVideoDubbingRecording = async () => {
+    console.log('[视频配音] 停止录制');
+    
+    try {
+      // 停止视频播放
+      if (videoRef.current) {
+        await videoRef.current.pauseAsync();
+      }
+      
+      // 停止摄像头录制
+      if (cameraRef.current) {
+        cameraRef.current.stopRecording();
+      }
+      
+      // 重置音频模式为播放模式
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
+      });
+    } catch (err) {
+      console.error('[视频配音] 停止录制失败:', err);
+    }
+  };
+  
+  // 处理视频配音模式下视频播放完成
+  const handleVideoDubbingPlaybackStatus = (status: AVPlaybackStatus) => {
+    handlePlaybackStatusUpdate(status);
+    
+    // 视频播放完成时停止摄像头录制
+    if (dubbingMode === 'video' && videoDubbingStatus === 'recording') {
+      if (status.isLoaded && status.didJustFinish) {
+        console.log('[视频配音] 视频播放完成，停止摄像头录制');
+        stopVideoDubbingRecording();
+      }
+    }
+  };
+  
+  // 播放视频配音录制的内容（试听）
+  const playVideoDubbingRecording = async () => {
+    if (!cameraRecordingUri) return;
+    
+    // 将视频重置到开头
+    if (videoRef.current) {
+      await videoRef.current.setIsMutedAsync(true);
+      await videoRef.current.setPositionAsync(0);
+      await videoRef.current.playAsync();
+    }
+    
+    // TODO: 同时播放录制的视频（需要另一个 Video 组件）
+    setIsPlayingRecording(true);
+  };
+  
+  // 提交视频配音合成任务
+  const submitVideoDubbing = async () => {
+    if (!cameraRecordingUri || !clip) {
+      console.log('[视频配音] cameraRecordingUri或clip为空');
+      return;
+    }
+
+    setVideoDubbingStatus('uploading');
+    setCompositeError(null);
+
+    try {
+      const userId = await getUserId();
+      
+      console.log('[视频配音] ===== 提交合成任务 =====');
+      console.log('[视频配音] cameraRecordingUri:', cameraRecordingUri);
+      console.log('[视频配音] video_url:', clip.videoUrl);
+      
+      // 创建 FormData
+      const formData = new FormData();
+      const videoFile = {
+        uri: cameraRecordingUri,
+        type: 'video/mp4',
+        name: 'camera_recording.mp4',
+      } as any;
+      formData.append('user_video', videoFile);
+      formData.append('video_url', clip.videoUrl);
+      formData.append('clip_path', clipPath);
+      formData.append('user_id', userId);
+      formData.append('mode', 'video'); // 视频配音模式
+      if (seasonId) formData.append('season_id', seasonId);
+      if (clip.originalText) formData.append('original_text', clip.originalText);
+      if (clip.translationCN) formData.append('translation_cn', clip.translationCN);
+      if (clip.thumbnail) formData.append('thumbnail', clip.thumbnail);
+      formData.append('duration', String(clip.duration || 0));
+
+      const response = await fetch(API_ENDPOINTS.compositeVideo, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`提交失败: ${response.status} - ${text}`);
+      }
+
+      const result = await response.json();
+      console.log('[视频配音] 任务创建成功:', result);
+      
+      setCompositeTaskId(result.task_id);
+      setVideoDubbingStatus('processing');
+      
+      // 开始轮询任务状态（视频配音模式）
+      startCompositePolling(result.task_id, 'video');
+      
+    } catch (err: any) {
+      console.error('[视频配音] 提交失败:', err);
+      setCompositeError(`提交失败: ${err.message}`);
+      setVideoDubbingStatus('recorded');
     }
   };
 
@@ -842,7 +1519,8 @@ export default function DubbingScreen() {
   };
 
   // 轮询合成任务状态
-  const startCompositePolling = (taskId: number) => {
+  // mode: 'audio' (录音配音) 或 'video' (视频配音)
+  const startCompositePolling = (taskId: number, mode: 'audio' | 'video' = 'audio') => {
     let pollCount = 0;
     const maxPolls = 120; // 最多轮询2分钟
 
@@ -855,7 +1533,11 @@ export default function DubbingScreen() {
           compositePollingRef.current = null;
         }
         setCompositeError('处理超时，请稍后重试');
-        setCompositeStatus('failed');
+        if (mode === 'video') {
+          setVideoDubbingStatus('failed');
+        } else {
+          setCompositeStatus('failed');
+        }
         return;
       }
 
@@ -868,11 +1550,12 @@ export default function DubbingScreen() {
             clearInterval(compositePollingRef.current);
             compositePollingRef.current = null;
           }
-          console.log('===== 合成完成 =====');
-          console.log('composite_video_path:', result.composite_video_path);
-          console.log('完整视频URL:', `${API_BASE_URL}${result.composite_video_path}`);
           setCompositeVideoPath(result.composite_video_path);
-          setCompositeStatus('completed');
+          if (mode === 'video') {
+            setVideoDubbingStatus('completed');
+          } else {
+            setCompositeStatus('completed');
+          }
           setShowCompositeModal(true);
         } else if (result.status === 'failed') {
           if (compositePollingRef.current) {
@@ -880,7 +1563,11 @@ export default function DubbingScreen() {
             compositePollingRef.current = null;
           }
           setCompositeError(result.error_message || '处理失败');
-          setCompositeStatus('failed');
+          if (mode === 'video') {
+            setVideoDubbingStatus('failed');
+          } else {
+            setCompositeStatus('failed');
+          }
         }
         // pending 或 processing 状态继续轮询
       } catch (err) {
@@ -889,11 +1576,14 @@ export default function DubbingScreen() {
     }, 1000);
   };
 
-  // 清理合成轮询
+  // 清理合成轮询和去人声轮询
   useEffect(() => {
     return () => {
       if (compositePollingRef.current) {
         clearInterval(compositePollingRef.current);
+      }
+      if (vocalRemovalPollingRef.current) {
+        clearInterval(vocalRemovalPollingRef.current);
       }
     };
   }, []);
@@ -989,14 +1679,18 @@ export default function DubbingScreen() {
       </View>
 
       {/* 视频播放区域 */}
-      <View style={styles.videoSection}>
+      <View style={[styles.videoSection, dubbingMode === 'video' && styles.videoSectionSmall]}>
         <Pressable style={styles.videoTouchArea} onPress={handleVideoPress}>
           <Video
             ref={videoRef}
-            source={{ uri: clip.videoUrl }}
+            source={{ uri: ((dubbingMode === 'record' || dubbingMode === 'video') && vocalRemovedLocalUri) ? vocalRemovedLocalUri : clip.videoUrl }}
             style={styles.video}
             resizeMode={ResizeMode.CONTAIN}
-            onPlaybackStatusUpdate={dubbingMode === 'record' ? handleFollowPlaybackStatus : handlePlaybackStatusUpdate}
+            onPlaybackStatusUpdate={
+              dubbingMode === 'record' ? handleFollowPlaybackStatus : 
+              dubbingMode === 'video' ? handleVideoDubbingPlaybackStatus : 
+              handlePlaybackStatusUpdate
+            }
             useNativeControls={false}
           />
           
@@ -1010,20 +1704,21 @@ export default function DubbingScreen() {
           )}
         </Pressable>
         
-        {/* 进度条区域 - 仅在暂停时显示 */}
-        {!isPlaying && videoDuration > 0 && (
+        {/* 进度条区域 - 暂停时显示，或录制/试听时始终显示 */}
+        {videoDuration > 0 && (!isPlaying || compositeStatus === 'recording' || videoDubbingStatus === 'recording' || isPlayingRecording) && (
           <View style={styles.progressContainer}>
             <ThemedText style={styles.timeText}>{formatTime(videoPosition)}</ThemedText>
             <Pressable 
               style={styles.progressBarContainer}
               onPress={handleProgressBarPress}
+              disabled={compositeStatus === 'recording' || videoDubbingStatus === 'recording' || isPlayingRecording}
             >
               <View style={[styles.progressBarBackground, { backgroundColor: 'rgba(255,255,255,0.3)' }]}>
                 <View 
                   style={[
                     styles.progressBarFill, 
                     { 
-                      backgroundColor: colors.primary,
+                      backgroundColor: (compositeStatus === 'recording' || videoDubbingStatus === 'recording') ? colors.error : colors.primary,
                       width: `${progressPercentage}%` 
                     }
                   ]} 
@@ -1032,7 +1727,7 @@ export default function DubbingScreen() {
                   style={[
                     styles.progressThumb,
                     { 
-                      backgroundColor: colors.primary,
+                      backgroundColor: (compositeStatus === 'recording' || videoDubbingStatus === 'recording') ? colors.error : colors.primary,
                       left: `${progressPercentage}%`,
                     }
                   ]}
@@ -1103,9 +1798,9 @@ export default function DubbingScreen() {
           ]}
           onPress={() => switchMode('score')}
         >
-          <IconSymbol name="star.fill" size={16} color={dubbingMode === 'score' ? '#FFFFFF' : colors.textSecondary} />
+          <IconSymbol name="star.fill" size={14} color={dubbingMode === 'score' ? '#FFFFFF' : colors.textSecondary} />
           <ThemedText style={[styles.modeTabText, { color: dubbingMode === 'score' ? '#FFFFFF' : colors.textSecondary }]}>
-            评分模式
+            评分
           </ThemedText>
         </Pressable>
         <Pressable 
@@ -1115,9 +1810,21 @@ export default function DubbingScreen() {
           ]}
           onPress={() => switchMode('record')}
         >
-          <IconSymbol name="video.fill" size={16} color={dubbingMode === 'record' ? '#FFFFFF' : colors.textSecondary} />
+          <IconSymbol name="mic.fill" size={14} color={dubbingMode === 'record' ? '#FFFFFF' : colors.textSecondary} />
           <ThemedText style={[styles.modeTabText, { color: dubbingMode === 'record' ? '#FFFFFF' : colors.textSecondary }]}>
-            录制配音
+            录音
+          </ThemedText>
+        </Pressable>
+        <Pressable 
+          style={[
+            styles.modeTab, 
+            dubbingMode === 'video' && { backgroundColor: colors.primary }
+          ]}
+          onPress={() => switchMode('video')}
+        >
+          <IconSymbol name="video.fill" size={14} color={dubbingMode === 'video' ? '#FFFFFF' : colors.textSecondary} />
+          <ThemedText style={[styles.modeTabText, { color: dubbingMode === 'video' ? '#FFFFFF' : colors.textSecondary }]}>
+            视频
           </ThemedText>
         </Pressable>
       </View>
@@ -1235,7 +1942,52 @@ export default function DubbingScreen() {
         {/* 录制配音模式的控制 */}
         {dubbingMode === 'record' && (
           <>
-            {compositeStatus === 'idle' && (
+            {/* 正在准备去人声视频 */}
+            {compositeStatus === 'idle' && (vocalRemovalStatus === 'pending' || vocalRemovalStatus === 'processing') && (
+              <View style={styles.controls}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <ThemedText style={[styles.uploadingText, { color: colors.textSecondary }]}>
+                  正在处理无人声视频...
+                </ThemedText>
+                <ThemedText style={[styles.processingHint, { color: colors.textSecondary }]}>
+                  首次使用需要处理，请稍候
+                </ThemedText>
+              </View>
+            )}
+
+            {/* 正在下载视频到本地 */}
+            {compositeStatus === 'idle' && vocalRemovalStatus === 'downloading' && (
+              <View style={styles.controls}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <ThemedText style={[styles.uploadingText, { color: colors.textSecondary }]}>
+                  正在下载视频到本地...
+                </ThemedText>
+                <ThemedText style={[styles.processingHint, { color: colors.textSecondary }]}>
+                  即将完成
+                </ThemedText>
+              </View>
+            )}
+
+            {/* 准备失败 */}
+            {compositeStatus === 'idle' && vocalRemovalStatus === 'failed' && (
+              <View style={styles.controls}>
+                <ThemedText style={[styles.hint, { color: colors.error }]}>
+                  ❌ 视频准备失败
+                </ThemedText>
+                <ThemedText style={[styles.errorHint, { color: colors.textSecondary }]}>
+                  {compositeError || '请重试'}
+                </ThemedText>
+                <Pressable 
+                  style={[styles.viewScoreButton, { backgroundColor: colors.primary }]}
+                  onPress={prepareVocalRemovedVideoInBackground}
+                >
+                  <ThemedText style={styles.viewScoreButtonText}>重新准备</ThemedText>
+                </Pressable>
+              </View>
+            )}
+
+            {/* 准备完成，可以开始录制 */}
+            {compositeStatus === 'idle' && vocalRemovalStatus === 'completed' && (
               <View style={styles.controls}>
                 <ThemedText style={[styles.hint, { color: colors.textSecondary }]}>
                   点击按钮，视频会自动播放，同时录制你的配音
@@ -1249,6 +2001,22 @@ export default function DubbingScreen() {
                 <ThemedText style={[styles.recordHint, { color: colors.textSecondary }]}>
                   跟读录制
                 </ThemedText>
+                <ThemedText style={[styles.vocalRemovedHint, { color: colors.success }]}>
+                  ✓ 已准备好无人声视频
+                </ThemedText>
+              </View>
+            )}
+
+            {/* 还没开始准备（刚进入但还没切换模式触发） */}
+            {compositeStatus === 'idle' && vocalRemovalStatus === 'idle' && (
+              <View style={styles.controls}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <ThemedText style={[styles.uploadingText, { color: colors.textSecondary }]}>
+                  正在准备无人声视频...
+                </ThemedText>
+                <ThemedText style={[styles.processingHint, { color: colors.textSecondary }]}>
+                  首次使用需要处理，请稍候
+                </ThemedText>
               </View>
             )}
 
@@ -1260,14 +2028,27 @@ export default function DubbingScreen() {
                     正在跟读录制...
                   </ThemedText>
                 </View>
-                <Pressable 
-                  style={[styles.recordButton, styles.recordingButtonStyle, { backgroundColor: colors.error }]}
-                  onPress={stopFollowRecording}
-                >
-                  <IconSymbol name="stop.fill" size={40} color="#FFFFFF" />
-                </Pressable>
+                
+                {/* 录制进度条 */}
+                <View style={styles.recordingProgressContainer}>
+                  <View style={[styles.recordingProgressBar, { backgroundColor: colors.backgroundSecondary }]}>
+                    <View 
+                      style={[
+                        styles.recordingProgressFill, 
+                        { 
+                          backgroundColor: colors.error,
+                          width: `${progressPercentage}%` 
+                        }
+                      ]} 
+                    />
+                  </View>
+                  <ThemedText style={[styles.recordingProgressText, { color: colors.text }]}>
+                    {formatTime(videoPosition)} / {formatTime(videoDuration)}
+                  </ThemedText>
+                </View>
+                
                 <ThemedText style={[styles.recordHint, { color: colors.textSecondary }]}>
-                  点击停止（或等视频播完自动停止）
+                  视频播完自动停止录制
                 </ThemedText>
               </View>
             )}
@@ -1373,6 +2154,144 @@ export default function DubbingScreen() {
             )}
           </>
         )}
+
+        {/* 视频配音模式的控制 */}
+        {dubbingMode === 'video' && (
+          <>
+            {/* 摄像头预览（正方形） */}
+            <View style={styles.cameraPreviewContainer}>
+              {cameraPermission?.granted ? (
+                <View style={styles.cameraPreviewWrapper}>
+                  <CameraView
+                    ref={cameraRef}
+                    style={styles.cameraPreview}
+                    facing="front"
+                    mode="video"
+                  />
+                  {/* 准备中的覆盖层 */}
+                  {videoDubbingStatus === 'idle' && (vocalRemovalStatus === 'pending' || vocalRemovalStatus === 'processing' || vocalRemovalStatus === 'downloading') && (
+                    <View style={styles.cameraOverlay}>
+                      <ActivityIndicator size="large" color="#FFFFFF" />
+                      <ThemedText style={styles.cameraOverlayText}>
+                        正在准备视频...
+                      </ThemedText>
+                    </View>
+                  )}
+                  {/* 开始录制按钮覆盖层 */}
+                  {videoDubbingStatus === 'idle' && vocalRemovalStatus === 'completed' && (
+                    <View style={styles.cameraOverlay}>
+                      <Pressable 
+                        style={[styles.videoDubbingButton, { backgroundColor: colors.error }]}
+                        onPress={startVideoDubbingRecording}
+                      >
+                        <IconSymbol name="record.circle" size={28} color="#FFFFFF" />
+                        <ThemedText style={styles.videoDubbingButtonText}>开始录制</ThemedText>
+                      </Pressable>
+                    </View>
+                  )}
+                  {/* 录制中的指示器 */}
+                  {videoDubbingStatus === 'recording' && (
+                    <View style={styles.cameraRecordingBadge}>
+                      <View style={styles.recordingDotSmall} />
+                      <ThemedText style={styles.cameraRecordingText}>REC</ThemedText>
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <View style={[styles.cameraPreview, styles.cameraPlaceholder, { backgroundColor: colors.backgroundSecondary }]}>
+                  <IconSymbol name="camera.fill" size={48} color={colors.textSecondary} />
+                  <ThemedText style={[styles.cameraPlaceholderText, { color: colors.textSecondary }]}>
+                    {cameraPermission === null ? '检查摄像头权限...' : '需要摄像头权限'}
+                  </ThemedText>
+                  {cameraPermission && !cameraPermission.granted && (
+                    <Pressable 
+                      style={[styles.permissionButton, { backgroundColor: colors.primary }]}
+                      onPress={requestCameraPermission}
+                    >
+                      <ThemedText style={styles.permissionButtonText}>授权摄像头</ThemedText>
+                    </Pressable>
+                  )}
+                </View>
+              )}
+            </View>
+
+            {/* 正在录制 - 进度信息 */}
+            {videoDubbingStatus === 'recording' && (
+              <View style={styles.videoDubbingControlsCompact}>
+                <ThemedText style={[styles.recordingTimeText, { color: colors.error }]}>
+                  ● {formatTime(videoPosition)} / {formatTime(videoDuration)}
+                </ThemedText>
+              </View>
+            )}
+
+            {/* 录制完成 - 显示简单提示 */}
+            {videoDubbingStatus === 'recorded' && (
+              <View style={styles.videoDubbingControlsCompact}>
+                <Pressable onPress={() => setShowVideoDubbingConfirm(true)}>
+                  <ThemedText style={[styles.videoDubbingHint, { color: colors.primary }]}>
+                    ✓ 录制完成，点击选择操作
+                  </ThemedText>
+                </Pressable>
+              </View>
+            )}
+
+            {/* 上传中 */}
+            {videoDubbingStatus === 'uploading' && (
+              <View style={styles.videoDubbingControls}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <ThemedText style={[styles.videoDubbingHint, { color: colors.textSecondary }]}>
+                  正在上传...
+                </ThemedText>
+              </View>
+            )}
+
+            {/* 合成中 */}
+            {videoDubbingStatus === 'processing' && (
+              <View style={styles.videoDubbingControls}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <ThemedText style={[styles.videoDubbingHint, { color: colors.textSecondary }]}>
+                  正在合成视频...
+                </ThemedText>
+                <ThemedText style={[styles.processingHint, { color: colors.textSecondary }]}>
+                  合成竖版720p视频，上方原视频，下方你的配音
+                </ThemedText>
+              </View>
+            )}
+
+            {/* 合成完成 */}
+            {videoDubbingStatus === 'completed' && (
+              <View style={styles.videoDubbingControls}>
+                <ThemedText style={[styles.videoDubbingHint, { color: colors.success }]}>
+                  ✅ 视频合成完成！
+                </ThemedText>
+                <Pressable 
+                  style={[styles.viewScoreButton, { backgroundColor: colors.primary }]}
+                  onPress={() => setShowCompositeModal(true)}
+                >
+                  <ThemedText style={styles.viewScoreButtonText}>查看合成视频</ThemedText>
+                </Pressable>
+              </View>
+            )}
+
+            {/* 合成失败 */}
+            {videoDubbingStatus === 'failed' && (
+              <View style={styles.videoDubbingControls}>
+                <ThemedText style={[styles.videoDubbingHint, { color: colors.error }]}>
+                  ❌ 合成失败
+                </ThemedText>
+                <ThemedText style={[styles.errorHint, { color: colors.textSecondary }]}>
+                  {compositeError || '请重试'}
+                </ThemedText>
+                <Pressable 
+                  style={[styles.viewScoreButton, { backgroundColor: colors.primary }]}
+                  onPress={resetVideoDubbing}
+                >
+                  <ThemedText style={styles.viewScoreButtonText}>重新录制</ThemedText>
+                </Pressable>
+              </View>
+            )}
+          </>
+        )}
       </View>
 
       {/* 评分结果弹窗 */}
@@ -1447,6 +2366,51 @@ export default function DubbingScreen() {
         </View>
       </Modal>
 
+      {/* 视频配音录制完成确认弹窗 */}
+      <Modal
+        visible={showVideoDubbingConfirm}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowVideoDubbingConfirm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.videoDubbingConfirmModal, { backgroundColor: colors.card }]}>
+            <View style={styles.videoDubbingConfirmIcon}>
+              <IconSymbol name="checkmark.circle.fill" size={56} color={colors.success} />
+            </View>
+            <ThemedText style={[styles.videoDubbingConfirmTitle, { color: colors.text }]}>
+              录制完成
+            </ThemedText>
+            <ThemedText style={[styles.videoDubbingConfirmDesc, { color: colors.textSecondary }]}>
+              是否上传并合成视频？
+            </ThemedText>
+            <ThemedText style={[styles.videoDubbingConfirmSubDesc, { color: colors.textSecondary }]}>
+              合成后将生成上下拼接的竖版视频
+            </ThemedText>
+            
+            <View style={styles.videoDubbingConfirmButtons}>
+              <Pressable 
+                style={[styles.videoDubbingConfirmBtn, styles.videoDubbingConfirmBtnSecondary, { borderColor: colors.cardBorder }]}
+                onPress={resetVideoDubbing}
+              >
+                <IconSymbol name="arrow.counterclockwise" size={20} color={colors.warning} />
+                <ThemedText style={[styles.videoDubbingConfirmBtnText, { color: colors.text }]}>重新录制</ThemedText>
+              </Pressable>
+              <Pressable 
+                style={[styles.videoDubbingConfirmBtn, styles.videoDubbingConfirmBtnPrimary, { backgroundColor: colors.success }]}
+                onPress={() => {
+                  setShowVideoDubbingConfirm(false);
+                  submitVideoDubbing();
+                }}
+              >
+                <IconSymbol name="arrow.up.circle.fill" size={20} color="#FFFFFF" />
+                <ThemedText style={[styles.videoDubbingConfirmBtnText, { color: '#FFFFFF' }]}>上传合成</ThemedText>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* 合成完成弹窗 */}
       <Modal
         visible={showCompositeModal}
@@ -1481,20 +2445,12 @@ export default function DubbingScreen() {
               {/* 预览视频 */}
               {compositeVideoPath && (
                 <View style={styles.compositePreview}>
-                  <ThemedText style={{ color: colors.textSecondary, fontSize: 10, marginBottom: 4 }}>
-                    视频: {getStreamingVideoUrl(compositeVideoPath)}
-                  </ThemedText>
                   <VideoPlayer
                     uri={getStreamingVideoUrl(compositeVideoPath)}
                     style={styles.compositeVideo}
                     autoPlay={true}
                   />
                 </View>
-              )}
-              {!compositeVideoPath && (
-                <ThemedText style={{ color: colors.error, textAlign: 'center', marginBottom: 16 }}>
-                  compositeVideoPath 为空
-                </ThemedText>
               )}
 
               {/* 下载按钮 */}
@@ -1934,6 +2890,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     position: 'relative',
   },
+  videoSectionSmall: {
+    height: width * 0.45, // 视频配音模式下视频区域稍小
+  },
   videoTouchArea: {
     flex: 1,
     alignItems: 'center',
@@ -2099,6 +3058,26 @@ const styles = StyleSheet.create({
   recordHint: {
     marginTop: 12,
     fontSize: 12,
+  },
+  recordingProgressContainer: {
+    width: '100%',
+    paddingHorizontal: 40,
+    marginVertical: 20,
+  },
+  recordingProgressBar: {
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  recordingProgressFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  recordingProgressText: {
+    marginTop: 8,
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   recordingIndicator: {
     flexDirection: 'row',
@@ -2493,6 +3472,164 @@ const styles = StyleSheet.create({
   processingHint: {
     marginTop: 8,
     fontSize: 12,
+    textAlign: 'center',
+  },
+  vocalRemovedHint: {
+    marginTop: 12,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  // 视频配音样式
+  cameraPreviewContainer: {
+    width: '100%',
+    aspectRatio: 1, // 正方形
+    marginBottom: 8,
+  },
+  cameraPreviewWrapper: {
+    flex: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  cameraPreview: {
+    flex: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  cameraOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cameraOverlayText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    marginTop: 8,
+  },
+  cameraRecordingBadge: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 4,
+    gap: 6,
+  },
+  recordingDotSmall: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FF3B30',
+  },
+  cameraRecordingText: {
+    color: '#FF3B30',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  cameraPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cameraPlaceholderText: {
+    marginTop: 8,
+    fontSize: 14,
+  },
+  permissionButton: {
+    marginTop: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  permissionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  videoDubbingControls: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  videoDubbingControlsCompact: {
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  recordingTimeText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  videoDubbingButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+    paddingVertical: 16,
+    borderRadius: 30,
+    gap: 10,
+  },
+  videoDubbingButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // 视频配音确认对话框样式
+  videoDubbingConfirmModal: {
+    width: '85%',
+    maxWidth: 340,
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+  },
+  videoDubbingConfirmIcon: {
+    marginBottom: 16,
+  },
+  videoDubbingConfirmTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  videoDubbingConfirmDesc: {
+    fontSize: 15,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  videoDubbingConfirmSubDesc: {
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  videoDubbingConfirmButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  videoDubbingConfirmBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 6,
+  },
+  videoDubbingConfirmBtnSecondary: {
+    borderWidth: 1,
+  },
+  videoDubbingConfirmBtnPrimary: {
+  },
+  videoDubbingConfirmBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  videoDubbingHint: {
+    marginTop: 8,
+    fontSize: 13,
     textAlign: 'center',
   },
   compositeSuccessHeader: {

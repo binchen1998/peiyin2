@@ -1,5 +1,4 @@
-import { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 
 interface VideoPlayerProps {
@@ -15,10 +14,6 @@ export function VideoPlayer({ uri, style, autoPlay = true }: VideoPlayerProps) {
       player.play();
     }
   });
-
-  useEffect(() => {
-    console.log('VideoPlayer 加载视频:', uri);
-  }, [uri]);
 
   return (
     <VideoView

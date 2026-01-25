@@ -44,9 +44,11 @@ MEDIA_CACHE_DIR = os.path.join(os.path.dirname(__file__), "media_cache")
 BACKGROUND_CACHE_DIR = os.path.join(MEDIA_CACHE_DIR, "background")
 MUTE_VIDEO_CACHE_DIR = os.path.join(MEDIA_CACHE_DIR, "mute_video")
 USER_AUDIO_DIR = os.path.join(os.path.dirname(__file__), "user_audio")
+USER_VIDEOS_DIR = os.path.join(os.path.dirname(__file__), "user_videos")
 USER_DUBBINGS_DIR = os.path.join(os.path.dirname(__file__), "user_dubbings")
 os.makedirs(BACKGROUND_CACHE_DIR, exist_ok=True)
 os.makedirs(MUTE_VIDEO_CACHE_DIR, exist_ok=True)
+os.makedirs(USER_VIDEOS_DIR, exist_ok=True)
 os.makedirs(USER_DUBBINGS_DIR, exist_ok=True)
 
 
@@ -484,6 +486,82 @@ def merge_audio_files(audio1_path: str, audio2_path: str, output_path: str) -> b
         return False
 
 
+def stack_videos_vertical(top_video: str, bottom_video: str, output_path: str, 
+                          output_width: int = 720, output_height: int = 1280) -> bool:
+    """
+    上下拼接两个视频，生成竖版视频
+    
+    Args:
+        top_video: 上方视频路径
+        bottom_video: 下方视频路径
+        output_path: 输出视频路径
+        output_width: 输出宽度（默认720p竖版）
+        output_height: 输出高度（默认1280）
+    
+    Returns:
+        是否成功
+    """
+    try:
+        # 计算每个视频的高度（上下各占一半）
+        half_height = output_height // 2
+        
+        # 使用 ffmpeg 进行上下拼接
+        # 1. 将两个视频缩放到相同宽度，高度为总高度的一半
+        # 2. 垂直堆叠
+        # 3. 使用上方视频的音频
+        cmd = [
+            'ffmpeg', '-y',
+            '-i', top_video,
+            '-i', bottom_video,
+            '-filter_complex',
+            f'[0:v]scale={output_width}:{half_height}:force_original_aspect_ratio=decrease,'
+            f'pad={output_width}:{half_height}:(ow-iw)/2:(oh-ih)/2:black[top];'
+            f'[1:v]scale={output_width}:{half_height}:force_original_aspect_ratio=decrease,'
+            f'pad={output_width}:{half_height}:(ow-iw)/2:(oh-ih)/2:black[bottom];'
+            f'[top][bottom]vstack=inputs=2[v]',
+            '-map', '[v]',
+            '-map', '1:a?',  # 使用下方视频（用户录制）的音频
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '23',
+            '-c:a', 'aac',
+            '-shortest',
+            output_path
+        ]
+        
+        logger.info(f"执行视频拼接命令: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"视频拼接失败: {result.stderr}")
+            return False
+        
+        logger.info(f"视频拼接完成: {output_path}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"视频拼接异常: {e}")
+        return False
+
+
+def get_mute_video_from_url(video_url: str, work_dir: str) -> Optional[str]:
+    """
+    从URL获取或下载无声视频
+    返回无声视频的本地路径
+    """
+    # 这里简化处理，直接下载并创建无声版本
+    url_hash = get_url_hash(video_url)
+    video_ext = Path(video_url).suffix or '.mp4'
+    
+    # 检查缓存
+    cached_mute_path = os.path.join(MUTE_VIDEO_CACHE_DIR, f"{url_hash}_mute{video_ext}")
+    if os.path.exists(cached_mute_path):
+        logger.info(f"使用缓存的无声视频: {cached_mute_path}")
+        return cached_mute_path
+    
+    return None  # 需要下载并处理
+
+
 async def get_or_create_background_and_mute_video(video_url: str) -> tuple:
     """
     获取或创建背景音和无声视频
@@ -583,13 +661,21 @@ async def process_composite_video_task(task: UserDubbing) -> dict:
     """
     处理视频合成任务
     
-    流程：
-    1. 获取或创建背景音和无声视频
-    2. 合并用户配音和背景音
-    3. 将合成音频与无声视频合成
-    4. 返回最终视频路径
+    支持两种模式：
+    1. audio (录音配音模式):
+       - 获取或创建背景音和无声视频
+       - 合并用户配音和背景音
+       - 将合成音频与无声视频合成
+    
+    2. video (视频配音模式):
+       - 下载原视频
+       - 上下拼接原视频和用户视频
+       - 生成竖版720p视频
     """
     db = get_db_session()
+    
+    # 获取任务模式（兼容旧数据，默认 audio）
+    mode = getattr(task, 'mode', None) or 'audio'
     
     try:
         # 更新状态为处理中
@@ -600,41 +686,24 @@ async def process_composite_video_task(task: UserDubbing) -> dict:
         work_dir = tempfile.mkdtemp(prefix=f"composite_final_{url_hash}_")
         
         try:
-            # 1. 获取或创建背景音和无声视频
-            logger.info(f"开始处理合成任务: {task.id}")
-            bg_audio_path, mute_video_path = await get_or_create_background_and_mute_video(task.original_video_url)
+            logger.info(f"开始处理合成任务: {task.id}, 模式: {mode}")
             
-            if not bg_audio_path or not mute_video_path:
-                raise Exception("获取背景音或无声视频失败")
+            if mode == "video":
+                # ===== 视频配音模式 =====
+                output_path = await process_video_dubbing_task(task, work_dir)
+            else:
+                # ===== 录音配音模式 =====
+                output_path = await process_audio_dubbing_task(task, work_dir)
             
-            # 2. 获取用户录音路径
-            user_audio_path = os.path.join(os.path.dirname(__file__), task.user_audio_path.lstrip('/'))
-            if not os.path.exists(user_audio_path):
-                raise Exception(f"用户录音文件不存在: {user_audio_path}")
-            
-            # 3. 合并用户配音和背景音
-            merged_audio_path = os.path.join(work_dir, "merged_audio.aac")
-            if not merge_audio_files(user_audio_path, bg_audio_path, merged_audio_path):
-                raise Exception("合并音频失败")
-            
-            # 4. 将合成音频与无声视频合成
-            video_ext = Path(task.original_video_url).suffix or '.mp4'
-            output_filename = f"{task.user_id}_{task.id}_composite{video_ext}"
-            output_video_path = os.path.join(USER_DUBBINGS_DIR, output_filename)
-            
-            if not merge_audio_to_video(mute_video_path, merged_audio_path, output_video_path):
-                raise Exception("合成最终视频失败")
-            
-            # 5. 更新任务状态为完成
-            relative_path = f"/user_dubbings/{output_filename}"
+            # 更新任务状态为完成
             update_user_dubbing(
                 db, task.id,
                 status="completed",
-                composite_video_path=relative_path
+                composite_video_path=output_path
             )
             
-            logger.info(f"合成任务完成: {task.id} -> {relative_path}")
-            return {"success": True, "output_path": relative_path}
+            logger.info(f"合成任务完成: {task.id} -> {output_path}")
+            return {"success": True, "output_path": output_path}
             
         finally:
             # 清理临时目录
@@ -650,6 +719,88 @@ async def process_composite_video_task(task: UserDubbing) -> dict:
         return {"success": False, "error": error_msg}
     finally:
         db.close()
+
+
+async def process_audio_dubbing_task(task: UserDubbing, work_dir: str) -> str:
+    """
+    处理录音配音任务
+    
+    流程：
+    1. 获取或创建背景音和无声视频
+    2. 合并用户配音和背景音
+    3. 将合成音频与无声视频合成
+    4. 返回最终视频路径
+    """
+    # 1. 获取或创建背景音和无声视频
+    bg_audio_path, mute_video_path = await get_or_create_background_and_mute_video(task.original_video_url)
+    
+    if not bg_audio_path or not mute_video_path:
+        raise Exception("获取背景音或无声视频失败")
+    
+    # 2. 获取用户录音路径
+    user_audio_path = os.path.join(os.path.dirname(__file__), task.user_audio_path.lstrip('/'))
+    if not os.path.exists(user_audio_path):
+        raise Exception(f"用户录音文件不存在: {user_audio_path}")
+    
+    # 3. 合并用户配音和背景音
+    merged_audio_path = os.path.join(work_dir, "merged_audio.aac")
+    if not merge_audio_files(user_audio_path, bg_audio_path, merged_audio_path):
+        raise Exception("合并音频失败")
+    
+    # 4. 将合成音频与无声视频合成
+    video_ext = Path(task.original_video_url).suffix or '.mp4'
+    output_filename = f"{task.user_id}_{task.id}_composite{video_ext}"
+    output_video_path = os.path.join(USER_DUBBINGS_DIR, output_filename)
+    
+    if not merge_audio_to_video(mute_video_path, merged_audio_path, output_video_path):
+        raise Exception("合成最终视频失败")
+    
+    return f"/user_dubbings/{output_filename}"
+
+
+async def process_video_dubbing_task(task: UserDubbing, work_dir: str) -> str:
+    """
+    处理视频配音任务
+    
+    流程：
+    1. 下载原视频（去人声版本）
+    2. 获取用户录制的视频
+    3. 上下拼接成竖版720p视频
+    4. 返回最终视频路径
+    """
+    # 1. 获取或下载原视频（使用去人声缓存或下载原视频）
+    url_hash = get_url_hash(task.original_video_url)
+    video_ext = Path(task.original_video_url).suffix or '.mp4'
+    
+    # 尝试使用去人声的缓存
+    cached_mute_path = os.path.join(MUTE_VIDEO_CACHE_DIR, f"{url_hash}_mute{video_ext}")
+    
+    if os.path.exists(cached_mute_path):
+        original_video_path = cached_mute_path
+        logger.info(f"使用缓存的无声视频: {cached_mute_path}")
+    else:
+        # 下载原视频
+        original_video_path = os.path.join(work_dir, f"original{video_ext}")
+        if not await download_video(task.original_video_url, original_video_path):
+            raise Exception("下载原视频失败")
+    
+    # 2. 获取用户录制的视频路径
+    user_video_path_attr = getattr(task, 'user_video_path', None)
+    if not user_video_path_attr:
+        raise Exception("视频配音模式需要用户视频")
+    
+    user_video_path = os.path.join(os.path.dirname(__file__), user_video_path_attr.lstrip('/'))
+    if not os.path.exists(user_video_path):
+        raise Exception(f"用户视频文件不存在: {user_video_path}")
+    
+    # 3. 上下拼接成竖版视频
+    output_filename = f"{task.user_id}_{task.id}_video_dubbing.mp4"
+    output_video_path = os.path.join(USER_DUBBINGS_DIR, output_filename)
+    
+    if not stack_videos_vertical(original_video_path, user_video_path, output_video_path):
+        raise Exception("视频拼接失败")
+    
+    return f"/user_dubbings/{output_filename}"
 
 
 async def composite_video_worker():

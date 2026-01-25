@@ -185,6 +185,8 @@ class UserDubbing(Base):
     season_id = Column(String(50))  # 季ID
     original_video_url = Column(String(1000), nullable=False)  # 原始视频URL
     user_audio_path = Column(String(500))  # 用户上传的录音路径
+    user_video_path = Column(String(500))  # 用户上传的视频路径（视频配音模式）
+    mode = Column(String(20), default="audio")  # 模式: audio(录音配音), video(视频配音)
     composite_video_path = Column(String(500))  # 合成后的视频路径
     status = Column(String(20), default="pending")  # pending, processing, completed, failed
     error_message = Column(Text)  # 错误信息

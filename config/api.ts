@@ -9,7 +9,7 @@ import { Platform } from 'react-native';
 const LOCAL_IP = '192.168.0.100'; // 修改为你的电脑IP
 
 // 生产服务器地址
-const PROD_SERVER = 'http://139.198.19.186:31041';
+const PROD_SERVER = 'https://peiyin2.coding61.com';
 
 // 根据平台选择合适的地址
 const getBaseUrl = () => {
@@ -54,6 +54,10 @@ export const API_ENDPOINTS = {
   wordLookup: (word: string) => `http://english-dict.coding61.com/word/${encodeURIComponent(word.toLowerCase())}`,
   wordStatus: (word: string) => `http://english-dict.coding61.com/word/${encodeURIComponent(word.toLowerCase())}/status`,
   
+  // 人声去除 API
+  vocalRemoval: `${API_BASE_URL}/api/app/vocal-removal`,
+  vocalRemovalStatus: (videoUrl: string) => `${API_BASE_URL}/api/app/vocal-removal?video_url=${encodeURIComponent(videoUrl)}`,
+  
   // 视频合成 API
   compositeVideo: `${API_BASE_URL}/api/app/composite-video`,
   compositeVideoStatus: (taskId: number) => `${API_BASE_URL}/api/app/composite-video?task_id=${taskId}`,
@@ -82,6 +86,27 @@ export const getStreamingVideoUrl = (path: string): string => {
   const filename = path.replace(/^\/user_dubbings\//, '');
   
   return `${API_BASE_URL}/api/app/video/${filename}`;
+};
+
+/**
+ * 将去人声视频路径转换为完整 URL
+ * 后端的 output_video_path 格式为 /media_cache/mute_video/xxx.mp4
+ * 
+ * @param path 视频路径，如 /media_cache/mute_video/xxx.mp4
+ * @returns 完整的视频 URL
+ */
+export const getVocalRemovedVideoUrl = (path: string): string => {
+  if (!path) return '';
+  
+  // 如果已经是完整 URL，直接返回
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  
+  // 去掉开头的斜杠
+  const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+  
+  return `${API_BASE_URL}/${cleanPath}`;
 };
 
 // 调试用：打印当前 API 地址

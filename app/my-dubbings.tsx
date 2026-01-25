@@ -376,9 +376,6 @@ export default function MyDubbingsScreen() {
 
             {previewDubbing && previewDubbing.composite_video_path && (
               <>
-                <ThemedText style={{ color: colors.textSecondary, fontSize: 10, padding: 8 }}>
-                  视频: {getStreamingVideoUrl(previewDubbing.composite_video_path)}
-                </ThemedText>
                 <VideoPlayer
                   uri={getStreamingVideoUrl(previewDubbing.composite_video_path)}
                   style={styles.previewVideo}
