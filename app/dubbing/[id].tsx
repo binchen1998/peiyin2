@@ -118,6 +118,7 @@ export default function DubbingScreen() {
   const videoRef = useRef<Video>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const playbackSoundRef = useRef<Audio.Sound | null>(null);
+  const isCreatingRecordingRef = useRef<boolean>(false); // 防止并发创建录音
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoDuration, setVideoDuration] = useState(0);
@@ -467,47 +468,55 @@ export default function DubbingScreen() {
   // 计算进度百分比
   const progressPercentage = videoDuration > 0 ? (videoPosition / videoDuration) * 100 : 0;
 
-  const startRecording = async () => {
+  // 清理录音资源
+  const forceCleanupRecording = async () => {
+    if (recordingRef.current) {
+      try {
+        await recordingRef.current.stopAndUnloadAsync();
+      } catch (e) {
+        // 忽略
+      }
+      recordingRef.current = null;
+    }
+    
+    // 重置音频模式
     try {
-      setError(null);
-      
-      // 停止视频播放
-      if (videoRef.current) {
-        await videoRef.current.pauseAsync();
-      }
-
-      // 确保之前的录音实例已被释放
-      if (recordingRef.current) {
-        try {
-          await recordingRef.current.stopAndUnloadAsync();
-        } catch (e) {
-          // 忽略错误，可能已经被释放
-        }
-        recordingRef.current = null;
-      }
-
-      // 确保之前的播放实例已被释放
-      if (playbackSoundRef.current) {
-        try {
-          await playbackSoundRef.current.unloadAsync();
-        } catch (e) {
-          // 忽略错误
-        }
-        playbackSoundRef.current = null;
-      }
-
-      // 先重置音频模式
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
         staysActiveInBackground: false,
         shouldDuckAndroid: false,
       });
+    } catch (e) {
+      // 忽略
+    }
+  };
 
-      // 等待一小段时间让 iOS 音频会话稳定
-      await new Promise(resolve => setTimeout(resolve, 100));
+  const startRecording = async () => {
+    try {
+      setError(null);
+      
+      // 检查是否正在创建录音，防止并发
+      if (isCreatingRecordingRef.current) {
+        return;
+      }
+      isCreatingRecordingRef.current = true;
+      
+      // 如果当前状态是已评分，先重置状态
+      if (recordingStatus === 'scored') {
+        setRecordingUri(null);
+        setScoringResult(null);
+      }
+      
+      // 停止视频播放
+      if (videoRef.current) {
+        await videoRef.current.pauseAsync();
+      }
 
-      // 再设置为录音模式
+      // 清理之前的录音资源
+      await forceCleanupRecording();
+
+      // 设置为录音模式
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
@@ -515,14 +524,12 @@ export default function DubbingScreen() {
         shouldDuckAndroid: false,
       });
 
-      // 再等待一小段时间
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      const { recording: newRecording } = await Audio.Recording.createAsync(
+      // 创建录音
+      const { recording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
       
-      recordingRef.current = newRecording;
+      recordingRef.current = recording;
       setRecordingStatus('recording');
     } catch (err) {
       console.error('开始录音失败:', err);
@@ -533,10 +540,14 @@ export default function DubbingScreen() {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
           playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid: false,
         });
       } catch (e) {
         // 忽略
       }
+    } finally {
+      isCreatingRecordingRef.current = false;
     }
   };
 
@@ -546,12 +557,12 @@ export default function DubbingScreen() {
 
       await recordingRef.current.stopAndUnloadAsync();
       const uri = recordingRef.current.getURI();
-      
       recordingRef.current = null;
+      
       setRecordingUri(uri);
       setRecordingStatus('recorded');
       
-      // 重要：停止录音后重置音频模式为播放模式
+      // 停止录音后重置音频模式为播放模式
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
@@ -563,7 +574,6 @@ export default function DubbingScreen() {
       setError('停止录音失败，请重试');
       setRecordingStatus('idle');
       
-      // 尝试重置音频模式
       try {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
@@ -744,8 +754,19 @@ export default function DubbingScreen() {
 
   const resetRecording = async () => {
     try {
-      // 关闭弹窗
       setShowScoreModal(false);
+      
+      // 重置音频模式
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid: false,
+        });
+      } catch (e) {
+        // 忽略
+      }
       
       // 释放录音实例
       if (recordingRef.current) {
@@ -772,22 +793,32 @@ export default function DubbingScreen() {
       setRecordingUri(null);
       setScoringResult(null);
       setRecordingStatus('idle');
-      
-      // 重置为播放模式（下次录音时再切换到录音模式）
+    } catch (err) {
+      console.error('重置录音失败:', err);
+    }
+  };
+
+  const handleBackFromScore = async () => {
+    setShowScoreModal(false);
+    // 先释放音频资源再返回
+    await resetRecording();
+    router.back();
+  };
+  
+  // 关闭评分弹窗（只关闭弹窗，不重置状态，用户可以再次查看）
+  const closeScoreModal = async () => {
+    setShowScoreModal(false);
+    // 重要：关闭弹窗时也要重置音频模式，避免下次录音失败
+    try {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
         staysActiveInBackground: false,
         shouldDuckAndroid: false,
       });
-    } catch (err) {
-      console.error('重置录音失败:', err);
+    } catch (e) {
+      // 忽略
     }
-  };
-
-  const handleBackFromScore = () => {
-    setShowScoreModal(false);
-    router.back();
   };
 
   // 查看历史记录详情
@@ -813,6 +844,7 @@ export default function DubbingScreen() {
     await resetRecording();
     await resetComposite();
     await resetVideoDubbing();
+    
     setDubbingMode(mode);
     
     // 切换到录制模式时，自动开始准备去人声视频
@@ -832,7 +864,6 @@ export default function DubbingScreen() {
     setVideoDubbingStatus('idle');
     setShowVideoDubbingConfirm(false);
     
-    // 重置音频模式为播放模式
     try {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
@@ -847,101 +878,58 @@ export default function DubbingScreen() {
   
   // 下载视频到本地
   const downloadVideoToLocal = async (remoteUrl: string): Promise<string> => {
-    console.log('[下载视频] 开始下载:', remoteUrl);
-    
-    // 生成本地文件名
     const fileName = `vocal_removed_${Date.now()}.mp4`;
     const localUri = `${FileSystem.cacheDirectory}${fileName}`;
     
-    console.log('[下载视频] 目标路径:', localUri);
+    const downloadResult = await FileSystem.downloadAsync(remoteUrl, localUri);
     
-    try {
-      const downloadResult = await FileSystem.downloadAsync(remoteUrl, localUri);
-      
-      console.log('[下载视频] 下载结果:', {
-        status: downloadResult.status,
-        uri: downloadResult.uri,
-        headers: downloadResult.headers,
-      });
-      
-      if (downloadResult.status !== 200) {
-        throw new Error(`下载失败，状态码: ${downloadResult.status}`);
-      }
-      
-      // 检查文件是否存在
-      const fileInfo = await FileSystem.getInfoAsync(downloadResult.uri);
-      console.log('[下载视频] 文件信息:', fileInfo);
-      
-      if (!fileInfo.exists) {
-        throw new Error('下载的文件不存在');
-      }
-      
-      console.log('[下载视频] 下载成功:', downloadResult.uri);
-      return downloadResult.uri;
-    } catch (err) {
-      console.error('[下载视频] 下载失败:', err);
-      throw err;
+    if (downloadResult.status !== 200) {
+      throw new Error(`下载失败，状态码: ${downloadResult.status}`);
     }
+    
+    const fileInfo = await FileSystem.getInfoAsync(downloadResult.uri);
+    if (!fileInfo.exists) {
+      throw new Error('下载的文件不存在');
+    }
+    
+    return downloadResult.uri;
   };
 
   // 后台准备去人声视频（不阻塞 UI）
   const prepareVocalRemovedVideoInBackground = async () => {
-    console.log('[准备视频] 开始准备去人声视频');
-    
-    if (!clip) {
-      console.log('[准备视频] clip 为空，跳过');
-      return;
-    }
+    if (!clip) return;
     
     // 如果已经有本地缓存的视频，不需要再准备
-    if (vocalRemovedLocalUri && vocalRemovalStatus === 'completed') {
-      console.log('[准备视频] 已有本地缓存，跳过:', vocalRemovedLocalUri);
-      return;
-    }
+    if (vocalRemovedLocalUri && vocalRemovalStatus === 'completed') return;
     
     // 如果正在处理中，不要重复请求
-    if (vocalRemovalStatus === 'pending' || vocalRemovalStatus === 'processing' || vocalRemovalStatus === 'downloading') {
-      console.log('[准备视频] 正在处理中，跳过');
-      return;
-    }
+    if (vocalRemovalStatus === 'pending' || vocalRemovalStatus === 'processing' || vocalRemovalStatus === 'downloading') return;
     
     setVocalRemovalStatus('pending');
-    console.log('[准备视频] 状态设为 pending');
     
     try {
-      // 请求去人声处理
-      console.log('[准备视频] 请求去人声处理:', clip.videoUrl);
       const result = await requestVocalRemoval(clip.videoUrl);
-      console.log('[准备视频] 服务器响应:', result);
       
       let remoteUrl: string;
       
       if (result.status === 'completed' && result.output_video_path) {
-        // 已经处理过，直接使用缓存
         remoteUrl = getVocalRemovedVideoUrl(result.output_video_path);
-        console.log('[准备视频] 服务器已有缓存:', remoteUrl);
       } else if (result.status === 'pending' || result.status === 'processing') {
-        // 需要等待处理
         setVocalRemovalStatus('processing');
-        console.log('[准备视频] 等待服务器处理...');
         remoteUrl = await pollVocalRemovalStatus(clip.videoUrl);
-        console.log('[准备视频] 服务器处理完成:', remoteUrl);
       } else {
         throw new Error(result.error_message || '处理失败');
       }
       
       // 下载到本地
       setVocalRemovalStatus('downloading');
-      console.log('[准备视频] 开始下载到本地...');
       const localUri = await downloadVideoToLocal(remoteUrl);
       
       setVocalRemovedVideoUrl(remoteUrl);
       setVocalRemovedLocalUri(localUri);
       setVocalRemovalStatus('completed');
-      console.log('[准备视频] 完成! 本地路径:', localUri);
-      
     } catch (err: any) {
-      console.error('[准备视频] 失败:', err);
+      console.error('准备视频失败:', err);
       setVocalRemovalStatus('failed');
       setCompositeError(`准备视频失败: ${err.message}`);
     }
@@ -949,6 +937,18 @@ export default function DubbingScreen() {
 
   // 重置合成状态
   const resetComposite = async () => {
+    // 重置音频模式
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
+      });
+    } catch (e) {
+      // 忽略
+    }
+    
     // 释放录音实例
     if (recordingRef.current) {
       try {
@@ -977,19 +977,22 @@ export default function DubbingScreen() {
     setRecordingUri(null);
     setIsPlayingRecording(false);
     
-    // 清除合成轮询
+    // 清除轮询
     if (compositePollingRef.current) {
       clearInterval(compositePollingRef.current);
       compositePollingRef.current = null;
     }
-    
-    // 清除去人声轮询
     if (vocalRemovalPollingRef.current) {
       clearInterval(vocalRemovalPollingRef.current);
       vocalRemovalPollingRef.current = null;
     }
+  };
+
+  // 关闭合成弹窗
+  const closeCompositeModal = async () => {
+    setShowCompositeModal(false);
     
-    // 重置音频模式为播放模式
+    // 重置音频模式
     try {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
@@ -1079,62 +1082,25 @@ export default function DubbingScreen() {
 
   // 开始跟读录制（视频播放 + 录音同步）
   const startFollowRecording = async () => {
-    console.log('[开始录制] ========== 开始 ==========');
-    console.log('[开始录制] vocalRemovalStatus:', vocalRemovalStatus);
-    console.log('[开始录制] vocalRemovedLocalUri:', vocalRemovedLocalUri);
-    console.log('[开始录制] vocalRemovedVideoUrl:', vocalRemovedVideoUrl);
-    console.log('[开始录制] videoRef.current:', !!videoRef.current);
-    
     try {
       setError(null);
       setCompositeError(null);
       
-      // 检查去人声视频是否准备好（使用本地缓存）
+      // 检查是否正在创建录音，防止并发
+      if (isCreatingRecordingRef.current) return;
+      isCreatingRecordingRef.current = true;
+      
+      // 检查去人声视频是否准备好
       if (!vocalRemovedLocalUri || vocalRemovalStatus !== 'completed') {
-        console.log('[开始录制] 视频还在准备中');
         setCompositeError('视频还在准备中，请稍候');
+        isCreatingRecordingRef.current = false;
         return;
       }
       
-      console.log('[开始录制] 视频准备完成，开始设置录音...');
-      
-      // 确保之前的录音实例已被释放
-      if (recordingRef.current) {
-        console.log('[开始录制] 释放之前的录音实例...');
-        try {
-          await recordingRef.current.stopAndUnloadAsync();
-        } catch (e) {
-          console.log('[开始录制] 释放录音实例错误（忽略）:', e);
-        }
-        recordingRef.current = null;
-      }
-
-      // 确保之前的播放实例已被释放
-      if (playbackSoundRef.current) {
-        console.log('[开始录制] 释放之前的播放实例...');
-        try {
-          await playbackSoundRef.current.unloadAsync();
-        } catch (e) {
-          console.log('[开始录制] 释放播放实例错误（忽略）:', e);
-        }
-        playbackSoundRef.current = null;
-      }
-
-      // 先重置音频模式
-      console.log('[开始录制] 重置音频模式...');
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-        shouldDuckAndroid: false,
-      });
-
-      // 等待一小段时间让 iOS 音频会话稳定
-      console.log('[开始录制] 等待 100ms...');
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // 清理之前的录音资源
+      await forceCleanupRecording();
 
       // 设置录音模式
-      console.log('[开始录制] 设置录音模式...');
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
@@ -1142,52 +1108,25 @@ export default function DubbingScreen() {
         shouldDuckAndroid: false,
       });
 
-      // 再等待一小段时间
-      console.log('[开始录制] 等待 100ms...');
-      await new Promise(resolve => setTimeout(resolve, 100));
-
       // 创建录音
-      console.log('[开始录制] 创建录音...');
-      const { recording: newRecording } = await Audio.Recording.createAsync(
+      const { recording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
-      console.log('[开始录制] 录音创建成功');
       
-      recordingRef.current = newRecording;
+      recordingRef.current = recording;
       setCompositeStatus('recording');
-      console.log('[开始录制] 状态设为 recording');
       
-      // 将视频重置到开头并静音播放（避免背景声和录音冲突）
+      // 将视频重置到开头并静音播放
       if (videoRef.current) {
-        console.log('[开始录制] 准备静音播放视频...');
-        console.log('[开始录制] 当前视频源应为本地文件:', vocalRemovedLocalUri);
-        
-        try {
-          console.log('[开始录制] 设置视频静音...');
-          await videoRef.current.setIsMutedAsync(true);  // 静音播放
-          
-          console.log('[开始录制] 设置视频位置到 0...');
-          await videoRef.current.setPositionAsync(0);
-          console.log('[开始录制] 位置设置成功');
-          
-          console.log('[开始录制] 调用 playAsync...');
-          const playbackStatus = await videoRef.current.playAsync();
-          console.log('[开始录制] playAsync 返回:', playbackStatus);
-        } catch (videoErr) {
-          console.error('[开始录制] 视频播放错误:', videoErr);
-          throw videoErr;
-        }
-      } else {
-        console.error('[开始录制] videoRef.current 为空！');
+        await videoRef.current.setIsMutedAsync(true);
+        await videoRef.current.setPositionAsync(0);
+        await videoRef.current.playAsync();
       }
-      
-      console.log('[开始录制] ========== 完成 ==========');
     } catch (err) {
-      console.error('[开始录制] 失败:', err);
+      console.error('开始录制失败:', err);
       setError('开始录制失败，请重试');
       setCompositeStatus('idle');
       
-      // 尝试重置音频模式
       try {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
@@ -1196,24 +1135,18 @@ export default function DubbingScreen() {
       } catch (e) {
         // 忽略
       }
+    } finally {
+      isCreatingRecordingRef.current = false;
     }
   };
 
   // 处理视频播放状态更新（用于跟读模式）
   const handleFollowPlaybackStatus = (status: AVPlaybackStatus) => {
-    // 调试日志
-    if (status.isLoaded) {
-      console.log('[视频状态] isPlaying:', status.isPlaying, 'position:', status.positionMillis, 'duration:', status.durationMillis);
-    } else {
-      console.log('[视频状态] 未加载或出错:', status);
-    }
-    
     handlePlaybackStatusUpdate(status);
     
     // 如果是跟读录制模式且视频播放完成，自动停止录音
     if (dubbingMode === 'record' && compositeStatus === 'recording') {
       if (status.isLoaded && status.didJustFinish) {
-        console.log('[视频状态] 视频播放完成，停止录音');
         stopFollowRecording();
       }
     }
@@ -1227,17 +1160,17 @@ export default function DubbingScreen() {
       // 停止视频播放并恢复声音
       if (videoRef.current) {
         await videoRef.current.pauseAsync();
-        await videoRef.current.setIsMutedAsync(false);  // 恢复声音
+        await videoRef.current.setIsMutedAsync(false);
       }
 
       await recordingRef.current.stopAndUnloadAsync();
       const uri = recordingRef.current.getURI();
-      
       recordingRef.current = null;
+      
       setRecordingUri(uri);
       setCompositeStatus('recorded');
       
-      // 重要：停止录音后重置音频模式为播放模式
+      // 停止录音后重置音频模式为播放模式
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
@@ -1249,7 +1182,6 @@ export default function DubbingScreen() {
       setError('停止录制失败，请重试');
       setCompositeStatus('idle');
       
-      // 尝试重置音频模式
       try {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
@@ -1265,16 +1197,12 @@ export default function DubbingScreen() {
   
   // 开始视频配音录制（摄像头录制 + 视频播放同步）
   const startVideoDubbingRecording = async () => {
-    console.log('[视频配音] ========== 开始录制 ==========');
-    
     if (!cameraRef.current) {
-      console.error('[视频配音] cameraRef 为空');
       setCompositeError('摄像头未准备好');
       return;
     }
     
     if (!vocalRemovedLocalUri || vocalRemovalStatus !== 'completed') {
-      console.log('[视频配音] 视频还在准备中');
       setCompositeError('视频还在准备中，请稍候');
       return;
     }
@@ -1283,50 +1211,42 @@ export default function DubbingScreen() {
       setError(null);
       setCompositeError(null);
       
-      // 重要：先配置音频会话，允许同时播放和录制
-      console.log('[视频配音] 配置音频会话...');
+      // 配置音频会话，允许同时播放和录制
       await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,  // 允许录制
+        allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
         staysActiveInBackground: false,
         shouldDuckAndroid: false,
       });
       
-      // 短暂延迟等待音频会话激活
       await new Promise(resolve => setTimeout(resolve, 100));
       
       setVideoDubbingStatus('recording');
       
-      // 将视频重置到开头并静音播放（避免背景声和录音冲突）
+      // 将视频重置到开头并静音播放
       if (videoRef.current) {
-        console.log('[视频配音] 开始静音播放视频...');
-        await videoRef.current.setIsMutedAsync(true);  // 静音播放
+        await videoRef.current.setIsMutedAsync(true);
         await videoRef.current.setPositionAsync(0);
         await videoRef.current.playAsync();
       }
       
       // 开始摄像头录制
-      console.log('[视频配音] 开始摄像头录制...');
       const videoRecording = await cameraRef.current.recordAsync({
-        maxDuration: Math.ceil((clip?.duration || 10) + 1), // 比视频长度多1秒
+        maxDuration: Math.ceil((clip?.duration || 10) + 1),
       });
-      
-      console.log('[视频配音] 摄像头录制完成:', videoRecording);
       
       if (videoRecording?.uri) {
         setCameraRecordingUri(videoRecording.uri);
         setVideoDubbingStatus('recorded');
-        // 自动弹出确认对话框
         setShowVideoDubbingConfirm(true);
       } else {
         throw new Error('录制失败，未获取到视频文件');
       }
     } catch (err) {
-      console.error('[视频配音] 录制失败:', err);
+      console.error('视频配音录制失败:', err);
       setCompositeError('录制失败，请重试');
       setVideoDubbingStatus('idle');
       
-      // 重置音频模式
       try {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
@@ -1340,21 +1260,16 @@ export default function DubbingScreen() {
   
   // 停止视频配音录制
   const stopVideoDubbingRecording = async () => {
-    console.log('[视频配音] 停止录制');
-    
     try {
-      // 停止视频播放并恢复声音
       if (videoRef.current) {
         await videoRef.current.pauseAsync();
-        await videoRef.current.setIsMutedAsync(false);  // 恢复声音
+        await videoRef.current.setIsMutedAsync(false);
       }
       
-      // 停止摄像头录制
       if (cameraRef.current) {
         cameraRef.current.stopRecording();
       }
       
-      // 重置音频模式为播放模式
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
@@ -1362,7 +1277,7 @@ export default function DubbingScreen() {
         shouldDuckAndroid: false,
       });
     } catch (err) {
-      console.error('[视频配音] 停止录制失败:', err);
+      console.error('停止视频配音录制失败:', err);
     }
   };
   
@@ -1370,10 +1285,8 @@ export default function DubbingScreen() {
   const handleVideoDubbingPlaybackStatus = (status: AVPlaybackStatus) => {
     handlePlaybackStatusUpdate(status);
     
-    // 视频播放完成时停止摄像头录制
     if (dubbingMode === 'video' && videoDubbingStatus === 'recording') {
       if (status.isLoaded && status.didJustFinish) {
-        console.log('[视频配音] 视频播放完成，停止摄像头录制');
         stopVideoDubbingRecording();
       }
     }
@@ -1396,10 +1309,7 @@ export default function DubbingScreen() {
   
   // 提交视频配音合成任务
   const submitVideoDubbing = async () => {
-    if (!cameraRecordingUri || !clip) {
-      console.log('[视频配音] cameraRecordingUri或clip为空');
-      return;
-    }
+    if (!cameraRecordingUri || !clip) return;
 
     setVideoDubbingStatus('uploading');
     setCompositeError(null);
@@ -1407,11 +1317,6 @@ export default function DubbingScreen() {
     try {
       const userId = await getUserId();
       
-      console.log('[视频配音] ===== 提交合成任务 =====');
-      console.log('[视频配音] cameraRecordingUri:', cameraRecordingUri);
-      console.log('[视频配音] video_url:', clip.videoUrl);
-      
-      // 创建 FormData
       const formData = new FormData();
       const videoFile = {
         uri: cameraRecordingUri,
@@ -1422,7 +1327,7 @@ export default function DubbingScreen() {
       formData.append('video_url', clip.videoUrl);
       formData.append('clip_path', clipPath);
       formData.append('user_id', userId);
-      formData.append('mode', 'video'); // 视频配音模式
+      formData.append('mode', 'video');
       if (seasonId) formData.append('season_id', seasonId);
       if (clip.originalText) formData.append('original_text', clip.originalText);
       if (clip.translationCN) formData.append('translation_cn', clip.translationCN);
@@ -1440,16 +1345,13 @@ export default function DubbingScreen() {
       }
 
       const result = await response.json();
-      console.log('[视频配音] 任务创建成功:', result);
       
       setCompositeTaskId(result.task_id);
       setVideoDubbingStatus('processing');
-      
-      // 开始轮询任务状态（视频配音模式）
       startCompositePolling(result.task_id, 'video');
       
     } catch (err: any) {
-      console.error('[视频配音] 提交失败:', err);
+      console.error('视频配音提交失败:', err);
       setCompositeError(`提交失败: ${err.message}`);
       setVideoDubbingStatus('recorded');
     }
@@ -1457,10 +1359,7 @@ export default function DubbingScreen() {
 
   // 上传录音并提交合成任务
   const submitCompositeVideo = async () => {
-    if (!recordingUri || !clip) {
-      console.log('submitCompositeVideo: recordingUri或clip为空', { recordingUri, clip });
-      return;
-    }
+    if (!recordingUri || !clip) return;
 
     setCompositeStatus('uploading');
     setCompositeError(null);
@@ -1468,15 +1367,6 @@ export default function DubbingScreen() {
     try {
       const userId = await getUserId();
       
-      console.log('===== 提交合成任务 =====');
-      console.log('recordingUri:', recordingUri);
-      console.log('video_url:', clip.videoUrl);
-      console.log('clip_path:', clipPath);
-      console.log('user_id:', userId);
-      console.log('season_id:', seasonId);
-      console.log('API URL:', API_ENDPOINTS.compositeVideo);
-      
-      // 创建 FormData
       const formData = new FormData();
       const audioFile = {
         uri: recordingUri,
@@ -1493,28 +1383,21 @@ export default function DubbingScreen() {
       if (clip.thumbnail) formData.append('thumbnail', clip.thumbnail);
       formData.append('duration', String(clip.duration || 0));
 
-      console.log('发送请求...');
-      // 注意：不要手动设置 Content-Type，让 fetch 自动设置正确的 boundary
       const response = await fetch(API_ENDPOINTS.compositeVideo, {
         method: 'POST',
         body: formData,
       });
 
-      console.log('响应状态:', response.status);
       const responseText = await response.text();
-      console.log('响应内容:', responseText);
 
       if (!response.ok) {
         throw new Error(`提交失败: ${response.status} - ${responseText}`);
       }
 
       const result: CompositeVideoResponse = JSON.parse(responseText);
-      console.log('合成任务创建成功:', result);
       
       setCompositeTaskId(result.task_id);
       setCompositeStatus('processing');
-      
-      // 开始轮询任务状态
       startCompositePolling(result.task_id);
       
     } catch (err) {
@@ -1949,12 +1832,20 @@ export default function DubbingScreen() {
                 <ThemedText style={[styles.hint, { color: colors.success }]}>
                   ✅ 评分完成！
                 </ThemedText>
-                <Pressable 
-                  style={[styles.viewScoreButton, { backgroundColor: colors.primary }]}
-                  onPress={() => setShowScoreModal(true)}
-                >
-                  <ThemedText style={styles.viewScoreButtonText}>查看评分结果</ThemedText>
-                </Pressable>
+                <View style={styles.scoredButtonsRow}>
+                  <Pressable 
+                    style={[styles.viewScoreButton, { backgroundColor: colors.primary }]}
+                    onPress={() => setShowScoreModal(true)}
+                  >
+                    <ThemedText style={styles.viewScoreButtonText}>查看评分结果</ThemedText>
+                  </Pressable>
+                  <Pressable 
+                    style={[styles.viewScoreButton, { backgroundColor: colors.warning, marginLeft: 12 }]}
+                    onPress={resetRecording}
+                  >
+                    <ThemedText style={styles.viewScoreButtonText}>重新录音</ThemedText>
+                  </Pressable>
+                </View>
               </View>
             )}
           </>
@@ -2307,7 +2198,7 @@ export default function DubbingScreen() {
         visible={showScoreModal}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => setShowScoreModal(false)}
+        onRequestClose={closeScoreModal}
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
@@ -2316,7 +2207,7 @@ export default function DubbingScreen() {
                 {/* 关闭按钮 */}
                 <Pressable 
                   style={styles.modalCloseButton}
-                  onPress={() => setShowScoreModal(false)}
+                  onPress={closeScoreModal}
                 >
                   <IconSymbol name="xmark" size={20} color={colors.textSecondary} />
                 </Pressable>
@@ -2424,7 +2315,7 @@ export default function DubbingScreen() {
         visible={showCompositeModal}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => setShowCompositeModal(false)}
+        onRequestClose={closeCompositeModal}
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
@@ -2432,7 +2323,7 @@ export default function DubbingScreen() {
               {/* 关闭按钮 */}
               <Pressable 
                 style={styles.modalCloseButton}
-                onPress={() => setShowCompositeModal(false)}
+                onPress={closeCompositeModal}
               >
                 <IconSymbol name="xmark" size={20} color={colors.textSecondary} />
               </Pressable>
@@ -2481,8 +2372,8 @@ export default function DubbingScreen() {
               <View style={styles.modalActions}>
                 <Pressable 
                   style={[styles.modalButton, { backgroundColor: colors.backgroundSecondary }]}
-                  onPress={() => {
-                    setShowCompositeModal(false);
+                  onPress={async () => {
+                    await closeCompositeModal();
                     resetComposite();
                   }}
                 >
@@ -2490,8 +2381,8 @@ export default function DubbingScreen() {
                 </Pressable>
                 <Pressable 
                   style={[styles.modalButton, { backgroundColor: colors.primary }]}
-                  onPress={() => {
-                    setShowCompositeModal(false);
+                  onPress={async () => {
+                    await closeCompositeModal();
                     router.back();
                   }}
                 >
@@ -3176,6 +3067,12 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 32,
     borderRadius: 16,
+  },
+  scoredButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 8,
   },
   viewScoreButtonText: {
     color: '#FFFFFF',

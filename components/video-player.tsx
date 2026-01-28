@@ -1,5 +1,6 @@
-import { StyleSheet } from 'react-native';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import { StyleSheet, View } from 'react-native';
+import { Video, ResizeMode, Audio } from 'expo-av';
+import { useRef, useEffect } from 'react';
 
 interface VideoPlayerProps {
   uri: string;
@@ -8,20 +9,39 @@ interface VideoPlayerProps {
 }
 
 export function VideoPlayer({ uri, style, autoPlay = true }: VideoPlayerProps) {
-  const player = useVideoPlayer(uri, player => {
-    player.loop = false;
-    if (autoPlay) {
-      player.play();
+  const videoRef = useRef<Video>(null);
+
+  // 组件卸载时释放资源并重置音频模式
+  useEffect(() => {
+    if (autoPlay && videoRef.current) {
+      videoRef.current.playAsync().catch(() => {});
     }
-  });
+
+    return () => {
+      if (videoRef.current) {
+        videoRef.current.stopAsync().catch(() => {});
+        videoRef.current.unloadAsync().catch(() => {});
+      }
+      
+      // 重置音频模式
+      Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
+      }).catch(() => {});
+    };
+  }, [autoPlay]);
 
   return (
-    <VideoView
+    <Video
+      ref={videoRef}
+      source={{ uri }}
       style={[styles.video, style]}
-      player={player}
-      allowsFullscreen
-      allowsPictureInPicture
-      nativeControls
+      resizeMode={ResizeMode.CONTAIN}
+      useNativeControls
+      shouldPlay={autoPlay}
+      isLooping={false}
     />
   );
 }
